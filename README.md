@@ -107,7 +107,7 @@ For other clients, configure a local stdio MCP server with command `bunx` and ar
 | `crawl_subforum` | Collect threads from subforum pages |
 | `bulk_get_threads` | Read several threads |
 | `get_user_reputation` | Read reputation details |
-| `find_latest_offsets` | Find a game's offsets thread in the forum and scan recent pages backward |
+| `find_latest_offsets` | Find a game's offsets thread in a dedicated or shared forum and scan recent pages backward |
 | `debug_page` | Inspect page structure |
 | `crawl_cache` | Inspect or clear the HTML cache |
 | `index_subforum` | Refresh a bounded local thread and post index for one subforum |
@@ -126,7 +126,7 @@ search_index({ query: "offsets", subforum: "apex-legends" })
 
 The server advertises forum research tools for game cheating scenes, cheat techniques and tooling, anti-cheat, reversing, and offsets questions. The connected AI client decides whether to invoke them; tool descriptions and server instructions guide selection but do not force a call. For a specific claim, read its source thread and report the source URL and date.
 
-The first directory lookup saves forum URLs in `forum-index.json`. Offsets lookups read the selected game's live thread listing, choose a linked candidate, and scan its recent pages from newest to oldest. Results include the listing URL, scanned pages, and source post. A matching post does not prove the offsets work with the current game build. If the game name is ambiguous, use a slug returned by `list_subforums` or pass an exact `thread_url`.
+The first directory lookup saves forum URLs in `forum-index.json`. Offsets lookups read the selected game's live thread listing, choose a linked candidate, and scan its recent pages from newest to oldest. For games in a shared forum, they try indexed thread titles and then native forum search. Results identify whether a candidate came from a listing, search, or the local index; opening the thread verifies it live. A matching post does not prove the offsets work with the current game build. If the game name is ambiguous, use a slug returned by `list_subforums` or pass an exact `thread_url`.
 
 Browsing or crawling a subforum records its visible listing in the local index. Reading a thread records the pages visited. `index_subforum` additionally samples the first and recent post pages of changed threads, up to five by default, and rechecks unchanged threads after 24 hours. The index remains partial: `search_index` includes listing and post page counts, timestamps, and a partial coverage marker. Use live search when freshness or missing coverage matters. The SQLite database is stored under the user's application data directory (`mcp-unknowncheat/forum-index.sqlite`); set `UC_INDEX_PATH` to change it. Browser-backed tools share one page and run one at a time; a queued call returns a busy error after 10 seconds. `get_thread`, `bulk_get_threads`, `crawl_subforum`, `index_subforum`, and `find_latest_offsets` stop starting new page requests after a 45-second fetch budget. `crawl_cache` reports cache hits, queued requests, failures, and total fetch time.
 

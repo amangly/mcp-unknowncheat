@@ -5,6 +5,7 @@ import { fetchHtml } from "../crawl.js";
 import { parseThread } from "../parsers/thread.js";
 import { parseCodeBlocks } from "../parsers/code-blocks.js";
 import { validateUrl } from "../browser.js";
+import { normalizeThreadUrl } from "../forum-url.js";
 import { getForumIndex } from "../forum-index.js";
 import type { ThreadPost } from "../types.js";
 import type { AuthorReputation } from "../parsers/reputation.js";
@@ -141,7 +142,8 @@ export function registerBulkGetThreads(server: McpServer): void {
       let timeBudgetReached = false;
       const deadlineAt = Date.now() + 45_000;
 
-      for (const url of urls) {
+      for (const rawUrl of urls) {
+        const url = normalizeThreadUrl(rawUrl);
         if (Date.now() >= deadlineAt) {
           timeBudgetReached = true;
           break;

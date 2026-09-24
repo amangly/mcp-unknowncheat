@@ -66,6 +66,19 @@ export function rankOffsetThreads(threads: ThreadListEntry[], listingPage: strin
     .sort((a, b) => b.score - a.score || b.replies - a.replies);
 }
 
+export function rankSharedForumOffsetThreads(game: string, threads: ThreadListEntry[], listingPage: string): OffsetThread[] {
+  const normalizedGame = normalizeName(game);
+  const wantsCn = /\b(?:cn|chinese|wegame)\b/.test(normalizedGame);
+  const gameTerms = normalizedGame.split(" ").filter((term) => !["cn", "chinese", "wegame"].includes(term));
+  return rankOffsetThreads(threads, listingPage)
+    .filter((thread) => {
+      const title = normalizeName(thread.title);
+      return gameTerms.every((term) => title.split(" ").includes(term)) &&
+        (!wantsCn || /\b(?:cn|chinese|wegame)\b/.test(title));
+    })
+    .sort((a, b) => b.score - a.score || b.replies - a.replies);
+}
+
 export function containsOffsetUpdate(post: ThreadPost): boolean {
   const firstValue = post.content.search(/\b0x[0-9a-f]{3,}\b/i);
   const firstLink = post.content.search(/https:\/\/(?:www\.)?(?:pastebin\.com|pastes\.dev)\//i);

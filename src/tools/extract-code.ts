@@ -6,6 +6,7 @@ import { parseCodeBlocks } from "../parsers/code-blocks.js";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { mkdir } from "node:fs/promises";
+import { normalizeThreadUrl } from "../forum-url.js";
 
 const MAX_CODE_LENGTH = 3_000;
 const EXPORT_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "exports");
@@ -32,6 +33,7 @@ export function registerExtractCode(server: McpServer): void {
     },
     async ({ url, limit, export_to_file }) => withBrowserSession(async () => {
       try {
+        url = normalizeThreadUrl(url);
         const html = await fetchHtml(url);
         const all = parseCodeBlocks(html);
 

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { parseSubforums } from "../src/parsers/subforums.ts";
 import { parseThreadList } from "../src/parsers/thread-list.ts";
-import { containsOffsetUpdate, rankGameForums, rankOffsetThreads } from "../src/offset-discovery.ts";
+import { containsOffsetUpdate, rankGameForums, rankOffsetThreads, rankSharedForumOffsetThreads } from "../src/offset-discovery.ts";
 import type { ThreadPost } from "../src/types.ts";
 
 describe("offset discovery", () => {
@@ -35,6 +35,14 @@ describe("offset discovery", () => {
       url: "https://www.unknowncheats.me/forum/apex-legends/716406-apex-reversal-structs-offsets.html",
       listingPage: listing,
     }]);
+  });
+
+  test("finds CN offset threads inside a shared game forum", () => {
+    const html = `<a id="thread_title_1" href="/other-fps-games/653290-delta-force-hawk-ops-reversal-structs-offsets.html">Delta Force:Hawk Ops Reversal, Structs and Offsets</a>
+      <a id="thread_title_2" href="/other-fps-games/741559-delta-force-wegame-structs-offsets.html">Delta Force WeGame， Structs and Offsets</a>`;
+    const threads = parseThreadList(html);
+    expect(rankSharedForumOffsetThreads("Delta Force CN", threads, "search").map((thread) => thread.threadId)).toEqual(["2"]);
+    expect(rankSharedForumOffsetThreads("Delta Force", threads, "search").map((thread) => thread.threadId)).toEqual(["1", "2"]);
   });
 
   test("distinguishes an update from a request for offsets", () => {

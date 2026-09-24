@@ -1,4 +1,5 @@
 import { load } from "cheerio";
+import { normalizeThreadUrl } from "../forum-url.js";
 
 export interface ThreadListEntry {
   title: string;
@@ -12,14 +13,6 @@ export interface ThreadListEntry {
   snippet?: string;
   isSticky: boolean;
   prefix?: string;
-}
-
-const UC_BASE = "https://www.unknowncheats.me";
-
-function absoluteUrl(href: string): string {
-  if (href.startsWith("http")) return href;
-  if (href.startsWith("//")) return `https:${href}`;
-  return `${UC_BASE}${href.startsWith("/") ? "" : "/"}${href}`;
 }
 
 export function parseThreadList(html: string): ThreadListEntry[] {
@@ -95,7 +88,7 @@ export function parseThreadList(html: string): ThreadListEntry[] {
 
     results.push({
       title,
-      url: absoluteUrl(href),
+      url: normalizeThreadUrl(href),
       threadId: id,
       author,
       date,

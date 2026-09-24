@@ -5,6 +5,7 @@ import path from "node:path";
 import type { ThreadListEntry } from "./parsers/thread-list.js";
 import type { ThreadPost } from "./types.js";
 import type { ThreadData } from "./types.js";
+import { normalizeThreadUrl } from "./forum-url.js";
 
 const DATA_DIR = process.platform === "win32"
   ? path.join(process.env.LOCALAPPDATA ?? os.homedir(), "mcp-unknowncheat")
@@ -218,9 +219,9 @@ export class ForumIndex {
     for (let i = 0; hits.length < safeLimit && (i < threads.length || i < posts.length); i++) {
       const thread = threads[i];
       const post = posts[i];
-      if (thread) hits.push({ ...thread, kind: "thread" });
+      if (thread) hits.push({ ...thread, kind: "thread", url: normalizeThreadUrl(thread.url) });
       if (post && hits.length < safeLimit) {
-        const url = new URL(post.url);
+        const url = new URL(normalizeThreadUrl(post.url));
         if (post.page && post.page > 1) url.searchParams.set("page", String(post.page));
         url.hash = `post${post.postId}`;
         hits.push({ ...post, kind: "post", url: url.toString() });

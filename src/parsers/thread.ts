@@ -1,6 +1,7 @@
 import { load } from "cheerio";
 import type { ThreadData, ThreadPost } from "../types.js";
 import { parseReputationInPost } from "./reputation.js";
+import { normalizeThreadUrl } from "../forum-url.js";
 
 function parseTotalPages($: ReturnType<typeof load>): number {
   // .pagenav contains "Page X of Y"
@@ -60,8 +61,8 @@ export function parseThread(html: string, url: string, pageNum = 1): ThreadData 
       const href = $(a).attr("href") ?? "";
       const text = $(a).text().trim();
       if (href && !href.startsWith("#")) {
-        const url = href.startsWith("http") ? href : `https://www.unknowncheats.me${href}`;
-        links.push({ text: text || url, url });
+        const resolved = normalizeThreadUrl(href);
+        if (/^https?:\/\//i.test(resolved)) links.push({ text: text || resolved, url: resolved });
       }
     });
 
@@ -70,8 +71,8 @@ export function parseThread(html: string, url: string, pageNum = 1): ThreadData 
     contentEl.find("img[src]").each((_, img) => {
       const src = $(img).attr("src") ?? "";
       if (src && !src.includes("clear.gif") && !src.includes("spacer") && !src.includes("wol_error") && !src.includes("statusicon")) {
-        const url = src.startsWith("http") ? src : `https://www.unknowncheats.me${src}`;
-        images.push(url);
+        const resolved = normalizeThreadUrl(src);
+        if (/^https?:\/\//i.test(resolved)) images.push(resolved);
       }
     });
 

@@ -1,4 +1,5 @@
 import { navigateWithRetry, validateUrl } from "./browser.js";
+import { normalizeThreadUrl } from "./forum-url.js";
 
 const CACHE_TTL_MS = Number(process.env.UC_CACHE_TTL_MS ?? 5 * 60_000);
 const MIN_REQUEST_INTERVAL_MS = Number(process.env.UC_MIN_REQUEST_INTERVAL_MS ?? 900);
@@ -37,6 +38,7 @@ export interface FetchOptions {
 }
 
 export async function fetchHtml(url: string, opts: FetchOptions = {}): Promise<string> {
+  url = normalizeThreadUrl(url);
   validateUrl(url);
   const ttl = opts.cacheOverrideTtlMs ?? CACHE_TTL_MS;
 

@@ -6,8 +6,10 @@ import { FORUM_INDEX, readForumCatalog, saveForumCatalog, type ForumCatalog } fr
 import type { Subforum } from "../parsers/subforums.js";
 import { parseThreadList, parsePaginationInfo } from "../parsers/thread-list.js";
 import { parseThread } from "../parsers/thread.js";
-import { containsOffsetUpdate, normalizeName, rankGameForums, rankOffsetThreads, type OffsetThread } from "../offset-discovery.js";
+import { containsOffsetUpdate, normalizeName, rankGameForums, rankOffsetThreads, rankSharedForumOffsetThreads, type OffsetThread } from "../offset-discovery.js";
 import { getForumIndex } from "../forum-index.js";
+import { normalizeThreadUrl } from "../forum-url.js";
+import { searchNativeThreads } from "../forum-search.js";
 
 const MAX_LISTING_PAGES = 10;
 const MAX_THREAD_PAGES = 50;
@@ -52,6 +54,7 @@ export function registerFindLatestOffsets(server: McpServer): void {
     async ({ game, subforum_slug, thread_url, max_listing_pages, max_thread_pages }) => withBrowserSession(async () => {
       const deadlineAt = Date.now() + 45_000;
       try {
+        if (thread_url) thread_url = normalizeThreadUrl(thread_url);
         if (thread_url) validateUrl(thread_url);
         const entry = thread_url ? await navigateWithRetry(thread_url, deadlineAt) : null;
         let browserPage: ForumPage | null = entry?.page ?? null;
@@ -69,48 +72,70 @@ export function registerFindLatestOffsets(server: McpServer): void {
           catalog = await readForumCatalog();
           fromCache = catalog !== null;
           if (!catalog) {
-            const index = await navigateWithRetry(FORUM_INDEX, deadlineAt);
-            browserPage = index.page;
-            catalog = await saveForumCatalog(index.html);
+            try {
+              const index = await navigateWithRetry(FORUM_INDEX, deadlineAt);
+              browserPage = index.page;
+              catalog = await saveForumCatalog(index.html);
+            } catch (error) {
+              console.error("[offsets] Forum directory unavailable; checking indexed threads:", error);
+            }
           }
-          let forums = catalog.subforums;
+          let forums = catalog?.subforums ?? [];
           forumChoices = rankGameForums(game, forums);
           forum = subforum_slug ? forums.find((item) => item.slug === subforum_slug) ?? null : forumChoices[0] ?? null;
           if (!forum && fromCache) {
-            const index = await navigateWithRetry(FORUM_INDEX, deadlineAt);
-            browserPage = index.page;
-            catalog = await saveForumCatalog(index.html);
-            fromCache = false;
-            forums = catalog.subforums;
-            forumChoices = rankGameForums(game, forums);
-            forum = subforum_slug ? forums.find((item) => item.slug === subforum_slug) ?? null : forumChoices[0] ?? null;
+            try {
+              const index = await navigateWithRetry(FORUM_INDEX, deadlineAt);
+              browserPage = index.page;
+              catalog = await saveForumCatalog(index.html);
+              fromCache = false;
+              forums = catalog.subforums;
+              forumChoices = rankGameForums(game, forums);
+              forum = subforum_slug ? forums.find((item) => item.slug === subforum_slug) ?? null : forumChoices[0] ?? null;
+            } catch (error) {
+              console.error("[offsets] Forum directory refresh failed; checking indexed threads:", error);
+            }
           }
-          if (!forum) {
+          if (!forum && subforum_slug) {
             return { content: [{ type: "text", text: JSON.stringify({
               found: false, reason: "game_forum_not_found", game,
-              forumIndex: { url: FORUM_INDEX, indexedAt: catalog.indexedAt, fromCache }, candidateForums: forumChoices.slice(0, 10),
+              forumIndex: catalog ? { url: FORUM_INDEX, indexedAt: catalog.indexedAt, fromCache } : undefined, candidateForums: forumChoices.slice(0, 10),
             }) }] };
           }
-          if (!subforum_slug &&
+          if (forum && !subforum_slug &&
               normalizeName(forum.label) !== normalizeName(game) &&
               normalizeName(forum.slug) !== normalizeName(game)) {
             return { content: [{ type: "text", text: JSON.stringify({
               found: false, reason: "ambiguous_game_forum", game,
-              forumIndex: { url: FORUM_INDEX, indexedAt: catalog.indexedAt, fromCache }, candidateForums: forumChoices.slice(0, 10),
+              forumIndex: catalog ? { url: FORUM_INDEX, indexedAt: catalog.indexedAt, fromCache } : undefined, candidateForums: forumChoices.slice(0, 10),
             }) }] };
           }
 
-          for (let number = 1; number <= max_listing_pages; number++) {
-            if (Date.now() >= deadlineAt) break;
-            const url = number === 1 ? forum.url : `${forum.url}index${number}.html`;
-            const response = browserPage ? await readPage(browserPage, url, deadlineAt) : await navigateWithRetry(url, deadlineAt);
-            browserPage = response.page;
-            listingPagesScanned.push(url);
-            const threads = parseThreadList(response.html);
-            if (threads.length === 0) throw new Error(`No thread list parsed from ${url}`);
-            getForumIndex().recordListing(forum.slug, number, threads);
-            candidates.push(...rankOffsetThreads(threads, url));
-            if (candidates.length > 0 || number >= parsePaginationInfo(response.html).totalPages) break;
+          if (forum) {
+            for (let number = 1; number <= max_listing_pages; number++) {
+              if (Date.now() >= deadlineAt) break;
+              const url = number === 1 ? forum.url : `${forum.url}index${number}.html`;
+              const response = browserPage ? await readPage(browserPage, url, deadlineAt) : await navigateWithRetry(url, deadlineAt);
+              browserPage = response.page;
+              listingPagesScanned.push(url);
+              const threads = parseThreadList(response.html);
+              if (threads.length === 0) throw new Error(`No thread list parsed from ${url}`);
+              getForumIndex().recordListing(forum.slug, number, threads);
+              candidates.push(...rankOffsetThreads(threads, url));
+              if (candidates.length > 0 || number >= parsePaginationInfo(response.html).totalPages) break;
+            }
+          } else {
+            const baseGame = normalizeName(game).replace(/\b(?:cn|chinese|wegame)\b/g, "").trim();
+            const indexed = getForumIndex().search(baseGame, undefined, 100)
+              .filter((hit) => hit.kind === "thread")
+              .map((hit) => ({ ...hit, replies: 0, views: 0, isSticky: false }));
+            candidates = rankSharedForumOffsetThreads(game, indexed, "local_index");
+            if (candidates.length === 0) {
+              const query = `${baseGame} offsets`;
+              const search = await searchNativeThreads(query, true, "relevancy", "", deadlineAt);
+              listingPagesScanned.push(search.resultsUrl);
+              candidates = rankSharedForumOffsetThreads(game, search.results, search.resultsUrl);
+            }
           }
 
           candidates = [...new Map(candidates.map((item) => [item.url, item])).values()]
@@ -119,8 +144,8 @@ export function registerFindLatestOffsets(server: McpServer): void {
           const selected = candidates[0];
           if (!selected) {
             return { content: [{ type: "text", text: JSON.stringify({
-              found: false, reason: Date.now() >= deadlineAt ? "time_budget_reached" : "offset_thread_not_found_in_scanned_listings", game, forum,
-              forumIndex: { url: FORUM_INDEX, indexedAt: catalog.indexedAt, fromCache }, listingPagesScanned,
+              found: false, reason: Date.now() >= deadlineAt ? "time_budget_reached" : forum ? "offset_thread_not_found_in_scanned_listings" : "offset_thread_not_found_in_search", game, forum,
+              forumIndex: catalog ? { url: FORUM_INDEX, indexedAt: catalog.indexedAt, fromCache } : undefined, listingPagesScanned,
             }) }] };
           }
           selectedUrl = selected.url;

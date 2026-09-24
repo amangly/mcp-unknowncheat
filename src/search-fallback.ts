@@ -49,9 +49,7 @@ export async function searchViaSubforums(
   const subforums = knownSubforums ?? discoverSubforumSlugs(await fetchHtml("https://www.unknowncheats.me/forum/index.php"));
   const ranked = rankSubforums(subforums, query);
 
-  const candidates = ranked.length > 0
-    ? ranked.slice(0, 3)
-    : [{ slug: query.trim().toLowerCase().replace(/\s+/g, "-"), label: query, score: 1 }];
+  const candidates = ranked.slice(0, 3);
 
   const seen = new Set<string>();
   const results: ThreadListEntry[] = [];

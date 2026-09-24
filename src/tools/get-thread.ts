@@ -5,6 +5,7 @@ import { fetchHtml } from "../crawl.js";
 import { parseThread } from "../parsers/thread.js";
 import { getForumIndex } from "../forum-index.js";
 import type { ThreadPost } from "../types.js";
+import { normalizeThreadUrl } from "../forum-url.js";
 
 const MAX_PAGES = 50;
 const MAX_IMAGES = 10; // max images to fetch and embed per call
@@ -62,11 +63,13 @@ export function registerGetThread(server: McpServer): void {
     { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
     async ({ url, fetch_all_pages, latest_pages, include_images }) => withBrowserSession(async () => {
       try {
+        url = normalizeThreadUrl(url);
         const deadlineAt = Date.now() + 45_000;
         const firstHtml = await fetchHtml(url, { deadlineAt });
         const pageParam = Number(new URL(url).searchParams.get("page"));
         const requestedPage = Number.isInteger(pageParam) && pageParam > 0 ? pageParam : 1;
         const firstPage = parseThread(firstHtml, url, requestedPage);
+        if (firstPage.posts.length === 0) throw new Error(`No thread posts found at ${url} (page title: ${firstPage.title})`);
         const totalPages = firstPage.totalPages;
         const pagesToFetch = latest_pages
           ? Array.from({ length: Math.min(latest_pages, totalPages) }, (_, index) =>

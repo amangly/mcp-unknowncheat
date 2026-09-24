@@ -3,6 +3,7 @@ import { existsSync, mkdirSync } from "node:fs";
 import os from "node:os";
 import path from "path";
 import { fileURLToPath } from "url";
+import { isApacheNotFoundPage, normalizeThreadUrl } from "./forum-url.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const COOKIES_PATH = path.join(__dirname, "..", "cookies.json");
@@ -187,6 +188,7 @@ function isNavigationAbortError(err: unknown): boolean {
 }
 
 export async function navigateWithRetry(url: string, deadlineAt?: number): Promise<{ page: BrowserInstance["page"]; html: string }> {
+  url = normalizeThreadUrl(url);
   validateUrl(url);
   let page = await getPage();
   let navRetried = false;
@@ -203,6 +205,7 @@ export async function navigateWithRetry(url: string, deadlineAt?: number): Promi
     await page.goto(url, { waitUntil, timeout: remaining(timeout) });
 
     const html = await waitForChallenge(page, await page.content(), deadlineAt);
+    if (isApacheNotFoundPage(html)) throw new Error(`Forum page not found (HTTP 404): ${url}`);
     remaining(1);
 
     await saveCookies(page);

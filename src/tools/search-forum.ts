@@ -1,20 +1,34 @@
 import { withBrowserSession } from "../browser.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { load } from "cheerio";
-import { navigateWithRetry } from "../browser.js";
 import { fetchHtml } from "../crawl.js";
 import { isLoggedIn } from "../auth.js";
 import { searchViaSubforums } from "../search-fallback.js";
 import { filterThreads, parseThreadList } from "../parsers/thread-list.js";
 import { FORUM_INDEX, readForumCatalog, saveForumCatalog } from "../forum-catalog.js";
 import { getForumIndex } from "../forum-index.js";
+import { searchNativeThreads } from "../forum-search.js";
 
 const UC_HOME = "https://www.unknowncheats.me/forum/";
-const UC_SEARCH = "https://www.unknowncheats.me/forum/search.php";
 
 async function runFallbackSearch(query: string) {
-  console.error(`[search] Not logged in — scanning UC subforums for "${query}"`);
+  console.error(`[search] Native search unavailable — checking the local index and subforums for "${query}"`);
+  const index = getForumIndex();
+  const indexedQuery = /\b(?:cn|chinese)\b/i.test(query)
+    ? query.replace(/\b(?:cn|chinese)\b/gi, "WeGame")
+    : query;
+  const hits = index.search(indexedQuery, undefined, 20).filter((hit) => hit.kind === "thread");
+  if (hits.length > 0) {
+    return {
+      count: hits.length,
+      source: "local_index" as const,
+      incomplete: true,
+      coverage: index.status(),
+      requiresLoginForNativeSearch: true,
+      hint: "These indexed listings may be stale. Open a thread to verify it live.",
+      results: hits,
+    };
+  }
   const catalog = await readForumCatalog() ?? await saveForumCatalog(await fetchHtml(FORUM_INDEX));
   const { results, scannedSubforums } = await searchViaSubforums(query, async (url) => {
     const html = await fetchHtml(url);
@@ -29,10 +43,13 @@ async function runFallbackSearch(query: string) {
   return {
     count: results.length,
     source: "subforum_scan" as const,
+    incomplete: true,
     scannedSubforums,
     requiresLoginForNativeSearch: true,
     hint: results.length === 0
-      ? "No matches in scanned subforums. Pass subforum (e.g. apex-legends) or use the login tool for full UC search."
+      ? scannedSubforums.length === 0
+        ? "No matching subforum was found. Log in for full UC search or pass an exact subforum slug."
+        : "No matches in scanned subforums. Pass subforum (e.g. apex-legends) or use the login tool for full UC search."
       : "Use the login tool for full UC advanced search (filters, sort, author).",
     results,
   };
@@ -78,64 +95,7 @@ export function registerSearchForum(server: McpServer): void {
           };
         }
 
-        const { page } = await navigateWithRetry(UC_SEARCH);
-
-        const submitted = await page.evaluate((opts) => {
-          const searchForm = document.getElementById("searchform") as HTMLFormElement | null;
-          if (!searchForm) return { ok: false, error: "Advanced search form (#searchform) not found" };
-
-          const queryInput = searchForm.querySelector('input[name="query"][size="35"]') as HTMLInputElement
-            ?? searchForm.querySelector('input[name="query"]') as HTMLInputElement;
-          if (!queryInput) return { ok: false, error: "Query input not found in form" };
-          queryInput.value = opts.query;
-
-          const titleOnlySelect = searchForm.querySelector('select[name="titleonly"]') as HTMLSelectElement;
-          if (titleOnlySelect) {
-            titleOnlySelect.value = opts.titleOnly ? "1" : "0";
-          }
-
-          const showThreads = searchForm.querySelector('input[name="showposts"][value="0"]') as HTMLInputElement;
-          if (showThreads) showThreads.checked = true;
-
-          const sortSelect = searchForm.querySelector('select[name="sortby"]') as HTMLSelectElement;
-          if (sortSelect) sortSelect.value = opts.sortBy;
-
-          if (opts.searchUser) {
-            const userInput = searchForm.querySelector('input[name="searchuser"]') as HTMLInputElement;
-            if (userInput) userInput.value = opts.searchUser;
-          }
-
-          return { ok: true };
-        }, { query, titleOnly: title_only, sortBy: sort_by, searchUser: search_user ?? "" });
-
-        if (!submitted.ok) {
-          const payload = await runFallbackSearch(query);
-          return {
-            content: [{ type: "text", text: JSON.stringify(payload) }],
-          };
-        }
-
-        await Promise.all([
-          page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 30_000 }),
-          page.evaluate(() => (document.getElementById("searchform") as HTMLFormElement).submit()),
-        ]);
-
-        const html = await page.content();
-        const results = parseThreadList(html);
-        if (results.length > 0) getForumIndex().recordSearchResults(results);
-        const $ = load(html);
-        const pageTitle = $("title").text().trim();
-
-        const errorText = $(".standard_error, .errorwrap, .blockbody .error").first().text().trim();
-        if (errorText) {
-          return {
-            content: [{ type: "text", text: JSON.stringify({ count: 0, error: errorText, pageTitle }) }],
-          };
-        }
-
-        const pageNav = $(".pagenav td.vbmenu_control").first().text().trim();
-        const pageMatch = pageNav.match(/Page (\d+) of (\d+)/);
-        const pagination = pageMatch ? { currentPage: parseInt(pageMatch[1]), totalPages: parseInt(pageMatch[2]) } : undefined;
+        const { results, pageTitle, pagination } = await searchNativeThreads(query, title_only, sort_by, search_user ?? "");
 
         console.error(`[search] "${query}" → ${results.length} results, page: ${pageTitle}`);
 
