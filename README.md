@@ -142,6 +142,10 @@ bun run inspect:html -- path/to/saved-forum-page.html
 The browser code and tools are in `src/`; HTML parsers are in `src/parsers/`. `downloads/`, `exports/`, `cookies.json`, and `forum-index.json` are local output ignored by Git.
 The HTML inspector reads a saved page locally and reports selector counts, parser coverage, pagination, and challenge markers without fetching the site.
 
+## Contributing
+
+Read the [contributing guide](https://github.com/amangly/mcp-unknowncheat/blob/master/CONTRIBUTING.md) for setup and pull requests. The [docs index](https://github.com/amangly/mcp-unknowncheat/blob/master/docs/README.md) links the architecture and testing guides. Bug reports should include the tool call, expected and actual result, and any page that could not be fetched; remove account data before posting.
+
 ## Configuration
 
 | Variable | Default | Purpose |
@@ -152,3 +156,7 @@ The HTML inspector reads a saved page locally and reports selector counts, parse
 | `UC_INDEX_PATH` | User application data directory | Path of the local SQLite search index |
 
 The npm package is [mcp-unknowncheatz](https://www.npmjs.com/package/mcp-unknowncheatz). Report bugs in [GitHub Issues](https://github.com/amangly/mcp-unknowncheat/issues).
+
+## License
+
+Apache License 2.0 from version 0.3.7. See [LICENSE](https://github.com/amangly/mcp-unknowncheat/blob/master/LICENSE) and [NOTICE](https://github.com/amangly/mcp-unknowncheat/blob/master/NOTICE). Published versions through 0.3.6 remain MIT licensed.

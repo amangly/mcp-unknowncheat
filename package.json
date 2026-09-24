@@ -1,6 +1,6 @@
 {
   "name": "mcp-unknowncheatz",
-  "version": "0.3.6",
+  "version": "0.3.7",
   "type": "module",
   "description": "MCP server for searching and reading the UnknownCheats forum",
   "bin": {
@@ -15,7 +15,7 @@
     "ai"
   ],
   "author": "amangly",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "repository": {
     "type": "git",
     "url": "https://github.com/amangly/mcp-unknowncheat.git"
@@ -30,7 +30,8 @@
   "files": [
     "src",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "NOTICE"
   ],
   "scripts": {
     "start": "bun run src/index.ts",
