@@ -7,7 +7,7 @@ A TypeScript MCP server for reading and searching the [UnknownCheats](https://ww
 Install [Bun](https://bun.sh) and Chrome or Chromium. Run the npm package with:
 
 ```sh
-bunx mcp-unknowncheat
+bunx mcp-unknowncheatz
 ```
 
 To run the source:
@@ -67,4 +67,4 @@ The browser code and tools are in `src/`; HTML parsers are in `src/parsers/`. `d
 | `UC_CACHE_TTL_MS` | `300000` | HTML cache lifetime, in milliseconds |
 | `UC_MIN_REQUEST_INTERVAL_MS` | `900` | Minimum interval between crawl requests, in milliseconds |
 
-The npm package is [mcp-unknowncheat](https://www.npmjs.com/package/mcp-unknowncheat). Report bugs in [GitHub Issues](https://github.com/amangly/mcp-unknowncheat/issues).
+The npm package is [mcp-unknowncheatz](https://www.npmjs.com/package/mcp-unknowncheatz). Report bugs in [GitHub Issues](https://github.com/amangly/mcp-unknowncheat/issues).

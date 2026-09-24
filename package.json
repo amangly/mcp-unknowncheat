@@ -1,10 +1,10 @@
 {
-  "name": "mcp-unknowncheat",
+  "name": "mcp-unknowncheatz",
   "version": "0.3.0",
   "type": "module",
   "description": "MCP server for searching and reading the UnknownCheats forum",
   "bin": {
-    "mcp-unknowncheat": "src/index.ts"
+    "mcp-unknowncheatz": "src/index.ts"
   },
   "keywords": [
     "mcp",
