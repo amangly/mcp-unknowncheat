@@ -8,7 +8,7 @@ https://github.com/user-attachments/assets/9f00f783-0a03-4e8d-b5b6-abd308936f20
 
 ## Install
 
-Install [Bun](https://bun.sh) and Chrome or Chromium. Run the npm package with:
+Install [Bun](https://bun.sh) and Google Chrome. The server uses the maintained `puppeteer-core` package and your installed browser; installation does not download a browser. Set `UC_CHROME_PATH` to an absolute Chrome or Chromium executable path if Chrome is not in its standard location. Run the npm package with:
 
 ```sh
 bunx mcp-unknowncheatz
@@ -23,7 +23,7 @@ bun install --frozen-lockfile
 bun run start
 ```
 
-The server uses MCP over standard input and output. Chrome opens when a tool first needs a page. You can log in with the `login` tool; session cookies are saved locally in `cookies.json`.
+The server uses MCP over standard input and output. Chrome opens when a tool first needs a page. On Linux without a graphical display, it runs headless; set `UC_HEADLESS=1` to request headless mode elsewhere. You can log in with the `login` tool; session cookies are saved locally in `cookies.json`. Browser challenges may require manual interaction in a visible Chrome window.
 
 ## Tools
 

@@ -1,4 +1,4 @@
-import { connect } from "puppeteer-real-browser";
+import puppeteer, { type Browser, type Page } from "puppeteer-core";
 import path from "path";
 import { fileURLToPath } from "url";
 
@@ -31,8 +31,8 @@ export function validateUrl(url: string): void {
 }
 
 type BrowserInstance = {
-  browser: Awaited<ReturnType<typeof connect>>["browser"];
-  page: Awaited<ReturnType<typeof connect>>["page"];
+  browser: Browser;
+  page: Page;
 };
 
 let instance: BrowserInstance | null = null;
@@ -88,16 +88,14 @@ async function saveCookies(page: BrowserInstance["page"]): Promise<void> {
 async function launchBrowser(): Promise<BrowserInstance> {
   console.error("[browser] Launching Chrome...");
   const onWayland = process.env.XDG_SESSION_TYPE === "wayland" || !!process.env.WAYLAND_DISPLAY;
-  const { browser, page } = await connect({
-    headless: false,
-    turnstile: true,
+  const executablePath = process.env.UC_CHROME_PATH?.trim();
+  const browser = await puppeteer.launch({
+    ...(executablePath ? { executablePath } : { channel: "chrome" as const }),
+    headless: process.env.UC_HEADLESS === "1" || (process.platform !== "win32" && !useRealDisplay()),
     args: onWayland ? ["--ozone-platform=wayland", "--start-maximized"] : ["--start-maximized"],
-    customConfig: {},
-    connectOption: {
-      defaultViewport: null,
-    },
-    disableXvfb: useRealDisplay(),
+    defaultViewport: null,
   });
+  const page = await browser.newPage();
 
   browser.on("disconnected", () => {
     console.error("[browser] Browser disconnected");

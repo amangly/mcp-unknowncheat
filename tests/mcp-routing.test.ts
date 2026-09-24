@@ -13,8 +13,8 @@ test("MCP advertises forum research routing and index tools", async () => {
   try {
     await client.connect(transport);
     const instructions = client.getInstructions() ?? "";
-    expect(instructions).toContain("game hacking");
-    expect(instructions).toContain("Search the local index first");
+    expect(instructions).toContain("game cheating scenes");
+    expect(instructions).toContain("Start with search_index");
     const tools = (await client.listTools()).tools;
     for (const name of ["search_index", "search_forum", "get_thread", "find_latest_offsets", "index_subforum", "index_status"]) {
       expect(tools.some((tool) => tool.name === name)).toBe(true);
