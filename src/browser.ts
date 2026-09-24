@@ -36,6 +36,30 @@ type BrowserInstance = {
 };
 
 let instance: BrowserInstance | null = null;
+let sessionTail: Promise<void> = Promise.resolve();
+
+// A tool owns the shared page until its whole workflow finishes. A navigation-only
+// lock would still let another tool replace the page before evaluate()/content().
+export function withBrowserSession<T>(operation: () => Promise<T>, maxQueueWaitMs = 10_000): Promise<T> {
+  let started = false;
+  let cancelled = false;
+  let timer: ReturnType<typeof setTimeout>;
+  const queueTimeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      if (started) return;
+      cancelled = true;
+      reject(new Error(`Browser busy: queue wait exceeded ${maxQueueWaitMs} ms`));
+    }, maxQueueWaitMs);
+  });
+  const result = sessionTail.then(() => {
+    if (cancelled) throw new Error("Browser session request cancelled while queued");
+    started = true;
+    clearTimeout(timer);
+    return operation();
+  });
+  sessionTail = result.then(() => undefined, () => undefined);
+  return Promise.race([result, queueTimeout]);
+}
 
 async function loadCookies(page: BrowserInstance["page"]): Promise<void> {
   try {
@@ -124,20 +148,28 @@ function isNavigationAbortError(err: unknown): boolean {
   return err.message.includes("ERR_ABORTED") || err.message.includes("Navigation failed");
 }
 
-export async function navigateWithRetry(url: string): Promise<{ page: BrowserInstance["page"]; html: string }> {
+export async function navigateWithRetry(url: string, deadlineAt?: number): Promise<{ page: BrowserInstance["page"]; html: string }> {
   validateUrl(url);
   let page = await getPage();
   let navRetried = false;
   let detachedRetried = false;
 
+  const remaining = (maximum: number): number => {
+    if (deadlineAt === undefined) return maximum;
+    const left = deadlineAt - Date.now();
+    if (left <= 0) throw new Error("Browser operation time budget exhausted");
+    return Math.max(1, Math.min(maximum, left));
+  };
+
   const attempt = async (timeout: number, waitUntil: "networkidle2" | "domcontentloaded" = "networkidle2"): Promise<string> => {
-    await page.goto(url, { waitUntil, timeout });
+    await page.goto(url, { waitUntil, timeout: remaining(timeout) });
 
     let html = await page.content();
 
     if (hasCloudflareChallenge(html)) {
       console.error("[browser] Cloudflare challenge detected, waiting", CF_WAIT_MS, "ms...");
-      await new Promise((res) => setTimeout(res, CF_WAIT_MS));
+      await new Promise((res) => setTimeout(res, remaining(CF_WAIT_MS)));
+      remaining(1);
       html = await page.content();
 
       if (hasCloudflareChallenge(html)) {

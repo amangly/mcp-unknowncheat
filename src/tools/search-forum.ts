@@ -1,3 +1,4 @@
+import { withBrowserSession } from "../browser.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { load } from "cheerio";
@@ -6,13 +7,24 @@ import { fetchHtml } from "../crawl.js";
 import { isLoggedIn } from "../auth.js";
 import { searchViaSubforums } from "../search-fallback.js";
 import { filterThreads, parseThreadList } from "../parsers/thread-list.js";
+import { FORUM_INDEX, readForumCatalog, saveForumCatalog } from "../forum-catalog.js";
+import { getForumIndex } from "../forum-index.js";
 
 const UC_HOME = "https://www.unknowncheats.me/forum/";
 const UC_SEARCH = "https://www.unknowncheats.me/forum/search.php";
 
 async function runFallbackSearch(query: string) {
   console.error(`[search] Not logged in — scanning UC subforums for "${query}"`);
-  const { results, scannedSubforums } = await searchViaSubforums(query, (url) => fetchHtml(url));
+  const catalog = await readForumCatalog() ?? await saveForumCatalog(await fetchHtml(FORUM_INDEX));
+  const { results, scannedSubforums } = await searchViaSubforums(query, async (url) => {
+    const html = await fetchHtml(url);
+    const slug = new URL(url).pathname.match(/^\/forum\/([a-z0-9-]+)\/$/)?.[1];
+    if (slug) {
+      const entries = parseThreadList(html);
+      if (entries.length > 0) getForumIndex().recordListing(slug, 1, entries);
+    }
+    return html;
+  }, catalog.subforums);
 
   return {
     count: results.length,
@@ -29,7 +41,7 @@ async function runFallbackSearch(query: string) {
 export function registerSearchForum(server: McpServer): void {
   server.tool(
     "search_forum",
-    "Search the UnknownCheats forum. Uses advanced search when logged in, scans relevant subforums as a guest, or browses a named subforum.",
+    "Use for live UnknownCheats evidence when a user asks about game hacking, cheats, anti-cheat, reversing, offsets, or a forum thread. Uses advanced search when logged in, scans relevant subforums as a guest, or browses a named subforum.",
     {
       query: z.string().optional().default("").describe("Search query string; optional when browsing a subforum"),
       subforum: z.string().optional().describe("Subforum slug to browse directly (e.g. 'apex-legends')"),
@@ -37,7 +49,8 @@ export function registerSearchForum(server: McpServer): void {
       sort_by: z.enum(["relevancy", "lastpost", "replycount", "views", "threadstart"]).optional().default("relevancy").describe("Sort results by"),
       search_user: z.string().optional().describe("Filter by thread author username"),
     },
-    async ({ query, subforum, title_only, sort_by, search_user }) => {
+    { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+    async ({ query, subforum, title_only, sort_by, search_user }) => withBrowserSession(async () => {
       try {
         if (!subforum && !query.trim()) {
           return {
@@ -49,7 +62,9 @@ export function registerSearchForum(server: McpServer): void {
         if (subforum) {
           const url = `https://www.unknowncheats.me/forum/${subforum}/`;
           const html = await fetchHtml(url);
-          const results = filterThreads(parseThreadList(html), { query, includeSticky: true });
+          const entries = parseThreadList(html);
+          if (entries.length > 0) getForumIndex().recordListing(subforum, 1, entries);
+          const results = filterThreads(entries, { query, includeSticky: true });
           return {
             content: [{ type: "text", text: JSON.stringify({ count: results.length, subforum, results }) }],
           };
@@ -107,6 +122,7 @@ export function registerSearchForum(server: McpServer): void {
 
         const html = await page.content();
         const results = parseThreadList(html);
+        if (results.length > 0) getForumIndex().recordSearchResults(results);
         const $ = load(html);
         const pageTitle = $("title").text().trim();
 
@@ -141,6 +157,6 @@ export function registerSearchForum(server: McpServer): void {
           };
         }
       }
-    }
+    })
   );
 }

@@ -1,3 +1,4 @@
+import { withBrowserSession } from "../browser.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { load } from "cheerio";
 import { navigateWithRetry } from "../browser.js";
@@ -6,7 +7,7 @@ import { isLoggedIn } from "../auth.js";
 const UC_HOME = "https://www.unknowncheats.me/forum/";
 
 export function registerCheckLogin(server: McpServer): void {
-  server.tool("check_login", "Check if the browser session is logged into UnknownCheats", {}, async () => {
+  server.tool("check_login", "Check if the browser session is logged into UnknownCheats", {}, async () => withBrowserSession(async () => {
     try {
       const { html } = await navigateWithRetry(UC_HOME);
       const $ = load(html);
@@ -37,5 +38,5 @@ export function registerCheckLogin(server: McpServer): void {
         isError: true,
       };
     }
-  });
+  }));
 }

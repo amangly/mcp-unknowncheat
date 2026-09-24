@@ -1,3 +1,4 @@
+import { withBrowserSession } from "../browser.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { fetchHtml } from "../crawl.js";
@@ -12,7 +13,7 @@ export function registerListSubforums(server: McpServer): void {
       limit: z.number().int().min(1).max(500).optional().default(100).describe("Max subforums returned (default 100)"),
       refresh: z.boolean().optional().default(false).describe("Fetch the forum index again instead of using the local directory"),
     },
-    async ({ query, limit, refresh }) => {
+    async ({ query, limit, refresh }) => withBrowserSession(async () => {
       try {
         const cached = refresh ? null : await readForumCatalog();
         const catalog = cached ?? await saveForumCatalog(await fetchHtml(FORUM_INDEX, { bypassCache: refresh }));
@@ -54,6 +55,6 @@ export function registerListSubforums(server: McpServer): void {
           isError: true,
         };
       }
-    }
+    })
   );
 }

@@ -1,3 +1,4 @@
+import { withBrowserSession } from "../browser.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { load } from "cheerio";
@@ -11,7 +12,7 @@ export function registerDebugPage(server: McpServer): void {
       url: z.string().url().describe("URL to inspect"),
       selector: z.string().optional().describe("CSS selector to extract (returns matched outerHTML)"),
     },
-    async ({ url, selector }) => {
+    async ({ url, selector }) => withBrowserSession(async () => {
       try {
         const { html } = await navigateWithRetry(url);
         const $ = load(html);
@@ -97,6 +98,6 @@ export function registerDebugPage(server: McpServer): void {
           isError: true,
         };
       }
-    }
+    })
   );
 }

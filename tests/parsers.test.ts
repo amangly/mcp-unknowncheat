@@ -30,4 +30,19 @@ describe("forum HTML parsers", () => {
     expect(scannedSubforums).toEqual(["apex-legends"]);
     expect(results).toMatchObject([{ threadId: "42", replies: 1234, views: 56789 }]);
   });
+
+  test("fallback search reuses the catalog and routes PUBG to the main forum", async () => {
+    const requested: string[] = [];
+    const listing = `<a id="thread_title_42" href="/forum/showthread.php?t=42">PUBG offsets</a>`;
+    const { scannedSubforums } = await searchViaSubforums("PUBG offsets", async (url) => {
+      requested.push(url);
+      return listing;
+    }, [
+      { slug: "pubg-mobile", label: "PUBG Mobile" },
+      { slug: "pubg-releases", label: "PUBG Releases" },
+      { slug: "playerunknown-s-battlegrounds", label: "Playerunknown's Battlegrounds" },
+    ]);
+    expect(scannedSubforums[0]).toBe("playerunknown-s-battlegrounds");
+    expect(requested.some((url) => url.endsWith("index.php"))).toBe(false);
+  });
 });

@@ -1,6 +1,7 @@
 node_modules/
 cookies.json
 forum-index.json
+forum-index.sqlite*
 *.tgz
 .env
 .env.*

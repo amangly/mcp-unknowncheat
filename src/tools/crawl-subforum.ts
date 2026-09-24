@@ -1,6 +1,8 @@
+import { withBrowserSession } from "../browser.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { fetchHtml } from "../crawl.js";
+import { getForumIndex } from "../forum-index.js";
 import {
   filterThreads,
   parsePaginationInfo,
@@ -43,19 +45,26 @@ export function registerCrawlSubforum(server: McpServer): void {
         .describe("Sort the collected results locally"),
       limit: z.number().int().min(1).max(500).optional().default(100).describe("Max threads returned after filtering/sorting"),
     },
-    async ({ subforum, max_pages, query, min_replies, min_views, author, prefix, include_sticky, sort_by, limit }) => {
+    async ({ subforum, max_pages, query, min_replies, min_views, author, prefix, include_sticky, sort_by, limit }) => withBrowserSession(async () => {
       try {
+        const deadlineAt = Date.now() + 45_000;
+        let timeBudgetReached = false;
         const pagesWalked: number[] = [];
         const collected: ThreadListEntry[] = [];
         const seen = new Set<string>();
         let totalPagesAvailable = 1;
 
         for (let page = 1; page <= max_pages; page++) {
+          if (Date.now() >= deadlineAt) {
+            timeBudgetReached = true;
+            break;
+          }
           const url = buildPageUrl(subforum, page);
           let html: string;
           try {
-            html = await fetchHtml(url);
+            html = await fetchHtml(url, { deadlineAt });
           } catch (err) {
+            if (Date.now() >= deadlineAt) timeBudgetReached = true;
             const message = err instanceof Error ? err.message : String(err);
             console.error(`[crawl-subforum] Failed page ${page}: ${message}`);
             break;
@@ -66,6 +75,7 @@ export function registerCrawlSubforum(server: McpServer): void {
           pagesWalked.push(page);
 
           const threads = parseThreadList(html);
+          if (threads.length > 0) getForumIndex().recordListing(subforum, page, threads);
           for (const thread of threads) {
             if (seen.has(thread.url)) continue;
             seen.add(thread.url);
@@ -98,6 +108,7 @@ export function registerCrawlSubforum(server: McpServer): void {
               text: JSON.stringify({
                 subforum,
                 pagesWalked,
+                timeBudgetReached,
                 totalPagesAvailable,
                 collected: collected.length,
                 matched: filtered.length,
@@ -123,6 +134,6 @@ export function registerCrawlSubforum(server: McpServer): void {
           isError: true,
         };
       }
-    }
+    })
   );
 }

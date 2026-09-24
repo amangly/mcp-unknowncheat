@@ -14,6 +14,16 @@ describe("offset discovery", () => {
     expect(rankGameForums("Unknown Game", parseSubforums(html))).toEqual([]);
   });
 
+  test("routes common game names to their main forums", () => {
+    const html = `<a href="/forum/pubg-mobile/">PUBG Mobile</a>
+      <a href="/forum/pubg-releases/">PUBG Releases</a>
+      <a href="/forum/playerunknown-s-battlegrounds/">Playerunknown's Battlegrounds</a>
+      <a href="/forum/counter-strike-2-a/">Counter-Strike 2</a>`;
+    const forums = parseSubforums(html);
+    expect(rankGameForums("PUBG", forums)[0]?.slug).toBe("playerunknown-s-battlegrounds");
+    expect(rankGameForums("CS2", forums)[0]?.slug).toBe("counter-strike-2-a");
+  });
+
   test("discovers an offset thread only from parsed listing links", () => {
     const html = `<table>
       <tr><td><a id="thread_title_1" href="/forum/apex-legends/1-chat.html">General chat</a></td></tr>

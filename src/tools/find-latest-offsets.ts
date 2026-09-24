@@ -1,3 +1,4 @@
+import { withBrowserSession } from "../browser.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { navigateWithRetry, validateUrl } from "../browser.js";
@@ -6,6 +7,7 @@ import type { Subforum } from "../parsers/subforums.js";
 import { parseThreadList, parsePaginationInfo } from "../parsers/thread-list.js";
 import { parseThread } from "../parsers/thread.js";
 import { containsOffsetUpdate, normalizeName, rankGameForums, rankOffsetThreads, type OffsetThread } from "../offset-discovery.js";
+import { getForumIndex } from "../forum-index.js";
 
 const MAX_LISTING_PAGES = 10;
 const MAX_THREAD_PAGES = 50;
@@ -17,27 +19,28 @@ function withPage(url: string, page: number): string {
   return target.toString();
 }
 
-async function readPage(page: ForumPage, url: string): Promise<{ page: ForumPage; html: string }> {
+async function readPage(page: ForumPage, url: string, deadlineAt: number): Promise<{ page: ForumPage; html: string }> {
   validateUrl(url);
+  if (Date.now() >= deadlineAt) throw new Error("Offsets lookup time budget exhausted");
   try {
-    const response = await page.evaluate(async (target) => {
-      const result = await fetch(target, { credentials: "include", signal: AbortSignal.timeout(8_000) });
+    const response = await page.evaluate(async ({ target, timeoutMs }) => {
+      const result = await fetch(target, { credentials: "include", signal: AbortSignal.timeout(timeoutMs) });
       return { ok: result.ok, url: result.url, html: await result.text() };
-    }, url);
+    }, { target: url, timeoutMs: Math.max(1, Math.min(8_000, deadlineAt - Date.now())) });
     validateUrl(response.url);
     if (!response.ok || /Just a moment|cf-browser-verification|Checking your browser/i.test(response.html)) {
       throw new Error("Forum returned a challenge or an error");
     }
     return { page, html: response.html };
   } catch {
-    return navigateWithRetry(url);
+    return navigateWithRetry(url, deadlineAt);
   }
 }
 
 export function registerFindLatestOffsets(server: McpServer): void {
   server.tool(
     "find_latest_offsets",
-    "Discover a game's offsets thread from live UnknownCheats forum listings, then scan from its last page backward for the newest matching post.",
+    "Use when asked for the newest game offsets on UnknownCheats. Discover the game's offsets thread from live listings, then scan from its last page backward for the newest matching post; this does not verify the offsets against a game build.",
     {
       game: z.string().min(1).describe("Game name, such as Apex Legends or PUBG"),
       subforum_slug: z.string().optional().describe("Exact subforum slug from list_subforums when needed"),
@@ -45,10 +48,12 @@ export function registerFindLatestOffsets(server: McpServer): void {
       max_listing_pages: z.number().int().min(1).max(MAX_LISTING_PAGES).optional().default(5).describe("Maximum game-forum listing pages to inspect"),
       max_thread_pages: z.number().int().min(1).max(MAX_THREAD_PAGES).optional().default(20).describe("Maximum recent thread pages to inspect"),
     },
-    async ({ game, subforum_slug, thread_url, max_listing_pages, max_thread_pages }) => {
+    { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+    async ({ game, subforum_slug, thread_url, max_listing_pages, max_thread_pages }) => withBrowserSession(async () => {
+      const deadlineAt = Date.now() + 45_000;
       try {
         if (thread_url) validateUrl(thread_url);
-        const entry = thread_url ? await navigateWithRetry(thread_url) : null;
+        const entry = thread_url ? await navigateWithRetry(thread_url, deadlineAt) : null;
         let browserPage: ForumPage | null = entry?.page ?? null;
         let catalog: ForumCatalog | null = null;
         let fromCache = false;
@@ -64,7 +69,7 @@ export function registerFindLatestOffsets(server: McpServer): void {
           catalog = await readForumCatalog();
           fromCache = catalog !== null;
           if (!catalog) {
-            const index = await navigateWithRetry(FORUM_INDEX);
+            const index = await navigateWithRetry(FORUM_INDEX, deadlineAt);
             browserPage = index.page;
             catalog = await saveForumCatalog(index.html);
           }
@@ -72,7 +77,7 @@ export function registerFindLatestOffsets(server: McpServer): void {
           forumChoices = rankGameForums(game, forums);
           forum = subforum_slug ? forums.find((item) => item.slug === subforum_slug) ?? null : forumChoices[0] ?? null;
           if (!forum && fromCache) {
-            const index = await navigateWithRetry(FORUM_INDEX);
+            const index = await navigateWithRetry(FORUM_INDEX, deadlineAt);
             browserPage = index.page;
             catalog = await saveForumCatalog(index.html);
             fromCache = false;
@@ -96,12 +101,14 @@ export function registerFindLatestOffsets(server: McpServer): void {
           }
 
           for (let number = 1; number <= max_listing_pages; number++) {
+            if (Date.now() >= deadlineAt) break;
             const url = number === 1 ? forum.url : `${forum.url}index${number}.html`;
-            const response = browserPage ? await readPage(browserPage, url) : await navigateWithRetry(url);
+            const response = browserPage ? await readPage(browserPage, url, deadlineAt) : await navigateWithRetry(url, deadlineAt);
             browserPage = response.page;
             listingPagesScanned.push(url);
             const threads = parseThreadList(response.html);
             if (threads.length === 0) throw new Error(`No thread list parsed from ${url}`);
+            getForumIndex().recordListing(forum.slug, number, threads);
             candidates.push(...rankOffsetThreads(threads, url));
             if (candidates.length > 0 || number >= parsePaginationInfo(response.html).totalPages) break;
           }
@@ -112,7 +119,7 @@ export function registerFindLatestOffsets(server: McpServer): void {
           const selected = candidates[0];
           if (!selected) {
             return { content: [{ type: "text", text: JSON.stringify({
-              found: false, reason: "offset_thread_not_found_in_scanned_listings", game, forum,
+              found: false, reason: Date.now() >= deadlineAt ? "time_budget_reached" : "offset_thread_not_found_in_scanned_listings", game, forum,
               forumIndex: { url: FORUM_INDEX, indexedAt: catalog.indexedAt, fromCache }, listingPagesScanned,
             }) }] };
           }
@@ -121,7 +128,7 @@ export function registerFindLatestOffsets(server: McpServer): void {
           discoveredAt = selected.listingPage;
         }
 
-        const first = entry ?? await readPage(browserPage!, selectedUrl);
+        const first = entry ?? await readPage(browserPage!, selectedUrl, deadlineAt);
         browserPage = first.page;
         const thread = parseThread(first.html, selectedUrl);
         selectedTitle ??= thread.title;
@@ -130,11 +137,14 @@ export function registerFindLatestOffsets(server: McpServer): void {
         const oldestPage = Math.max(1, thread.totalPages - max_thread_pages + 1);
 
         for (let number = thread.totalPages; number >= oldestPage; number--) {
+          if (Date.now() >= deadlineAt) break;
           const url = withPage(selectedUrl, number);
-          const response: { page: ForumPage; html: string } = number === 1 && thread.totalPages === 1 ? first : await readPage(browserPage!, url);
+          const response: { page: ForumPage; html: string } = number === 1 && thread.totalPages === 1 ? first : await readPage(browserPage!, url, deadlineAt);
           browserPage = response.page;
-          const posts = parseThread(response.html, url, number).posts;
+          const parsed = parseThread(response.html, url, number);
+          const posts = parsed.posts;
           if (posts.length === 0) throw new Error(`No posts parsed from ${url}`);
+          getForumIndex().recordThreadPage(parsed, number);
           pagesScanned.push(number);
           const match = posts.reverse().find(containsOffsetUpdate);
           if (match) {
@@ -152,7 +162,7 @@ export function registerFindLatestOffsets(server: McpServer): void {
         }
 
         return { content: [{ type: "text", text: JSON.stringify({
-          found: false, reason: "no_offset_update_in_scanned_pages", game, forum,
+          found: false, reason: Date.now() >= deadlineAt ? "time_budget_reached" : "no_offset_update_in_scanned_pages", game, forum,
           forumIndex: catalog ? { url: FORUM_INDEX, indexedAt: catalog.indexedAt, fromCache } : undefined,
           thread: { title: selectedTitle, url: selectedUrl, discoveredAt }, candidateThreads: candidates,
           listingPagesScanned, totalThreadPages: thread.totalPages, pagesScanned,
@@ -160,8 +170,14 @@ export function registerFindLatestOffsets(server: McpServer): void {
         }) }] };
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
+        if (Date.now() >= deadlineAt) {
+          return { content: [{ type: "text", text: JSON.stringify({
+            found: false, reason: "time_budget_reached", game, thread_url,
+            checkedAt: new Date().toISOString(), error: message,
+          }) }] };
+        }
         return { content: [{ type: "text", text: `Error: ${message}` }], isError: true };
       }
-    }
+    })
   );
 }

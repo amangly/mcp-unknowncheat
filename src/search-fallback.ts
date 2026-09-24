@@ -1,5 +1,6 @@
 import { load } from "cheerio";
 import { filterThreads, parseThreadList, type ThreadListEntry } from "./parsers/thread-list.js";
+import { preferredForumSlug } from "./offset-discovery.js";
 
 function discoverSubforumSlugs(html: string): Array<{ slug: string; label: string }> {
   const $ = load(html);
@@ -26,11 +27,13 @@ function rankSubforums(
 ): Array<{ slug: string; label: string; score: number }> {
   const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
   const slugGuess = query.trim().toLowerCase().replace(/\s+/g, "-");
+  const preferredSlug = preferredForumSlug(query);
 
   const ranked = subforums.map((entry) => {
     const haystack = `${entry.slug} ${entry.label}`.toLowerCase();
     let score = terms.filter((term) => haystack.includes(term)).length;
     if (entry.slug === slugGuess) score += 10;
+    if (entry.slug === preferredSlug) score += 20;
     if (entry.slug.includes(slugGuess) || slugGuess.includes(entry.slug)) score += 3;
     return { ...entry, score };
   });
@@ -40,10 +43,10 @@ function rankSubforums(
 
 export async function searchViaSubforums(
   query: string,
-  fetchHtml: (url: string) => Promise<string>
+  fetchHtml: (url: string) => Promise<string>,
+  knownSubforums?: Array<{ slug: string; label: string }>,
 ): Promise<{ results: ThreadListEntry[]; scannedSubforums: string[] }> {
-  const indexHtml = await fetchHtml("https://www.unknowncheats.me/forum/index.php");
-  const subforums = discoverSubforumSlugs(indexHtml);
+  const subforums = knownSubforums ?? discoverSubforumSlugs(await fetchHtml("https://www.unknowncheats.me/forum/index.php"));
   const ranked = rankSubforums(subforums, query);
 
   const candidates = ranked.length > 0

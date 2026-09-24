@@ -1,3 +1,4 @@
+import { withBrowserSession } from "../browser.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { getPage, navigateWithRetry, validateUrl } from "../browser.js";
@@ -148,7 +149,7 @@ export function registerDownloadFile(server: McpServer): void {
         .default(true)
         .describe("If true, reads and returns text file contents for analysis (default true)"),
     },
-    async ({ url, analyze }) => {
+    async ({ url, analyze }) => withBrowserSession(async () => {
       try {
         validateUrl(url);
         await mkdir(DOWNLOADS_DIR, { recursive: true });
@@ -401,6 +402,6 @@ export function registerDownloadFile(server: McpServer): void {
           isError: true,
         };
       }
-    }
+    })
   );
 }

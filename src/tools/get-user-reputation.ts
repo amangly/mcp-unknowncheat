@@ -1,3 +1,4 @@
+import { withBrowserSession } from "../browser.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { load } from "cheerio";
@@ -32,7 +33,7 @@ export function registerGetUserReputation(server: McpServer): void {
         .optional()
         .describe("Numeric UC user ID (alternative to profile_url)"),
     },
-    async ({ profile_url, user_id }) => {
+    async ({ profile_url, user_id }) => withBrowserSession(async () => {
       try {
         const url = profile_url ?? (user_id
           ? `https://www.unknowncheats.me/forum/members/${user_id}.html`
@@ -120,6 +121,6 @@ export function registerGetUserReputation(server: McpServer): void {
           isError: true,
         };
       }
-    }
+    })
   );
 }

@@ -1,9 +1,11 @@
+import { withBrowserSession } from "../browser.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { fetchHtml } from "../crawl.js";
 import { parseThread } from "../parsers/thread.js";
 import { parseCodeBlocks } from "../parsers/code-blocks.js";
 import { validateUrl } from "../browser.js";
+import { getForumIndex } from "../forum-index.js";
 import type { ThreadPost } from "../types.js";
 import type { AuthorReputation } from "../parsers/reputation.js";
 
@@ -130,18 +132,27 @@ export function registerBulkGetThreads(server: McpServer): void {
       min_op_rep,
       exclude_negative_op,
       min_op_trust,
-    }) => {
+    }) => withBrowserSession(async () => {
       const results: unknown[] = [];
       const skipped: Array<{ url: string; reason: string; opAuthor?: string; opReputation?: AuthorReputation }> = [];
       let successCount = 0;
       let errorCount = 0;
+      let processed = 0;
+      let timeBudgetReached = false;
+      const deadlineAt = Date.now() + 45_000;
 
       for (const url of urls) {
+        if (Date.now() >= deadlineAt) {
+          timeBudgetReached = true;
+          break;
+        }
+        processed++;
         try {
           validateUrl(url);
 
-          const firstHtml = await fetchHtml(url);
+          const firstHtml = await fetchHtml(url, { deadlineAt });
           const first = parseThread(firstHtml, url, 1);
+          getForumIndex().recordThreadPage(first, 1);
           const opPost = first.posts[0];
           const opRep = opPost?.reputation ?? null;
 
@@ -181,13 +192,19 @@ export function registerBulkGetThreads(server: McpServer): void {
           if (fetch_all_pages && first.totalPages > 1) {
             const limit = Math.min(first.totalPages, MAX_PAGES_PER_THREAD);
             for (let pageNum = 2; pageNum <= limit; pageNum++) {
+              if (Date.now() >= deadlineAt) {
+                timeBudgetReached = true;
+                break;
+              }
               const pageUrl = buildPageUrl(url, pageNum);
               try {
-                const pageHtml = await fetchHtml(pageUrl);
+                const pageHtml = await fetchHtml(pageUrl, { deadlineAt });
                 const parsed = parseThread(pageHtml, pageUrl, pageNum);
+                getForumIndex().recordThreadPage(parsed, pageNum);
                 allPosts.push(...parsed.posts);
                 pagesFetched.push(pageNum);
               } catch (pageErr) {
+                if (Date.now() >= deadlineAt) timeBudgetReached = true;
                 console.error(`[bulk] Page ${pageNum} of ${url} failed:`, pageErr);
                 break;
               }
@@ -262,6 +279,7 @@ export function registerBulkGetThreads(server: McpServer): void {
           results.push(threadResult);
           successCount++;
         } catch (err) {
+          if (Date.now() >= deadlineAt) timeBudgetReached = true;
           const message = err instanceof Error ? err.message : String(err);
           results.push({ url, error: message });
           errorCount++;
@@ -276,6 +294,8 @@ export function registerBulkGetThreads(server: McpServer): void {
               requested: urls.length,
               succeeded: successCount,
               failed: errorCount,
+              timeBudgetReached,
+              remainingUrls: urls.slice(processed),
               skipped: skipped.length,
               skippedDetail: skipped,
               threads: results,
@@ -283,6 +303,6 @@ export function registerBulkGetThreads(server: McpServer): void {
           },
         ],
       };
-    }
+    })
   );
 }

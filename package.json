@@ -37,7 +37,8 @@
     "dev": "bun --watch src/index.ts",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
-    "build": "bun build src/index.ts --target=bun --outdir=dist"
+    "build": "bun build src/index.ts --target=bun --outdir=dist",
+    "inspect:html": "bun run scripts/inspect-html.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.1",

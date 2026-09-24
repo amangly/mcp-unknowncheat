@@ -1,3 +1,4 @@
+import { withBrowserSession } from "../browser.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { load } from "cheerio";
@@ -15,7 +16,7 @@ export function registerLogin(server: McpServer): void {
       username: z.string().describe("UnknownCheats username"),
       password: z.string().describe("UnknownCheats password"),
     },
-    async ({ username, password }) => {
+    async ({ username, password }) => withBrowserSession(async () => {
       try {
         const { page } = await navigateWithRetry(UC_LOGIN);
 
@@ -66,6 +67,6 @@ export function registerLogin(server: McpServer): void {
           isError: true,
         };
       }
-    }
+    })
   );
 }

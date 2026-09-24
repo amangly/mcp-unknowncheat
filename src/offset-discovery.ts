@@ -6,9 +6,31 @@ export function normalizeName(value: string): string {
   return value.toLowerCase().replace(/['’]/g, "").replace(/[^a-z0-9]+/g, " ").trim();
 }
 
+const GAME_FORUM_ALIASES: Record<string, string> = {
+  pubg: "playerunknown-s-battlegrounds",
+  "playerunknowns battlegrounds": "playerunknown-s-battlegrounds",
+  cs2: "counter-strike-2-a",
+  "counter strike 2": "counter-strike-2-a",
+  csgo: "counterstrike-global-offensive",
+};
+
+export function preferredForumSlug(queryText: string): string | undefined {
+  const query = normalizeName(queryText);
+  if (query.includes("pubg mobile")) return undefined;
+  return Object.entries(GAME_FORUM_ALIASES)
+    .sort(([a], [b]) => b.length - a.length)
+    .find(([name]) => query === name || query.startsWith(`${name} `) ||
+      query.endsWith(` ${name}`) || query.includes(` ${name} `))?.[1];
+}
+
 export function rankGameForums(game: string, forums: Subforum[]): Subforum[] {
   const query = normalizeName(game);
   if (!query) return [];
+  const alias = preferredForumSlug(game);
+  if (alias) {
+    const exact = forums.find((forum) => forum.slug === alias);
+    if (exact) return [exact];
+  }
   const terms = query.split(" ");
   return forums
     .map((forum) => {

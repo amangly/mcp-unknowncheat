@@ -1,3 +1,4 @@
+import { withBrowserSession } from "../browser.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { fetchHtml } from "../crawl.js";
@@ -29,7 +30,7 @@ export function registerExtractCode(server: McpServer): void {
         .default(false)
         .describe("If true, exports ALL code blocks to a JSON file instead of returning them inline. Recommended when a page has many code blocks."),
     },
-    async ({ url, limit, export_to_file }) => {
+    async ({ url, limit, export_to_file }) => withBrowserSession(async () => {
       try {
         const html = await fetchHtml(url);
         const all = parseCodeBlocks(html);
@@ -103,6 +104,6 @@ export function registerExtractCode(server: McpServer): void {
           isError: true,
         };
       }
-    }
+    })
   );
 }

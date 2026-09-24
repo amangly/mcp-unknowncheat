@@ -1,7 +1,9 @@
+import { withBrowserSession } from "../browser.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { fetchHtml } from "../crawl.js";
 import { parseThread } from "../parsers/thread.js";
+import { getForumIndex } from "../forum-index.js";
 import type { ThreadPost } from "../types.js";
 
 const MAX_PAGES = 50;
@@ -13,11 +15,11 @@ function buildPageUrl(baseUrl: string, page: number): string {
   return url.toString();
 }
 
-async function fetchImageAsBase64(url: string): Promise<{ data: string; mimeType: string } | null> {
+async function fetchImageAsBase64(url: string, deadlineAt: number): Promise<{ data: string; mimeType: string } | null> {
   try {
     const res = await fetch(url, {
       headers: { "User-Agent": "Mozilla/5.0" },
-      signal: AbortSignal.timeout(8_000),
+      signal: AbortSignal.timeout(Math.max(1, Math.min(8_000, deadlineAt - Date.now()))),
     });
     if (!res.ok) return null;
 
@@ -36,7 +38,7 @@ async function fetchImageAsBase64(url: string): Promise<{ data: string; mimeType
 export function registerGetThread(server: McpServer): void {
   server.tool(
     "get_thread",
-    "Get a forum thread. Use latest_pages for recent posts in long-running threads; the default reads only the linked page.",
+    "Read the source UnknownCheats thread behind a game hacking or offset claim. Use latest_pages for recent posts in long-running threads; the default reads only the linked page.",
     {
       url: z.string().url().describe("Thread URL"),
       fetch_all_pages: z
@@ -57,9 +59,11 @@ export function registerGetThread(server: McpServer): void {
         .default(false)
         .describe("If true, fetches post images and returns them as viewable image content (max 10 images)"),
     },
-    async ({ url, fetch_all_pages, latest_pages, include_images }) => {
+    { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+    async ({ url, fetch_all_pages, latest_pages, include_images }) => withBrowserSession(async () => {
       try {
-        const firstHtml = await fetchHtml(url);
+        const deadlineAt = Date.now() + 45_000;
+        const firstHtml = await fetchHtml(url, { deadlineAt });
         const pageParam = Number(new URL(url).searchParams.get("page"));
         const requestedPage = Number.isInteger(pageParam) && pageParam > 0 ? pageParam : 1;
         const firstPage = parseThread(firstHtml, url, requestedPage);
@@ -72,20 +76,42 @@ export function registerGetThread(server: McpServer): void {
             : [Math.min(requestedPage, totalPages)];
 
         const allPosts: ThreadPost[] = [];
+        const pagesFetched: number[] = [];
+        let timeBudgetReached = false;
         for (const pageNum of pagesToFetch) {
+          if (pageNum !== requestedPage && Date.now() >= deadlineAt) {
+            timeBudgetReached = true;
+            break;
+          }
           const pageUrl = buildPageUrl(url, pageNum);
-          const html = pageNum === requestedPage ? firstHtml : await fetchHtml(pageUrl);
-          allPosts.push(...parseThread(html, pageUrl, pageNum).posts);
+          let html: string;
+          try {
+            html = pageNum === requestedPage ? firstHtml : await fetchHtml(pageUrl, { deadlineAt });
+          } catch (error) {
+            if (Date.now() < deadlineAt) throw error;
+            timeBudgetReached = true;
+            break;
+          }
+          const parsed = parseThread(html, pageUrl, pageNum);
+          allPosts.push(...parsed.posts);
+          getForumIndex().recordThreadPage(parsed, pageNum);
+          pagesFetched.push(pageNum);
           console.error(`[get-thread] Fetched page ${pageNum}/${totalPages}`);
+        }
+        if (pagesFetched.length === 0 && firstPage.posts.length > 0) {
+          allPosts.push(...firstPage.posts);
+          pagesFetched.push(requestedPage);
+          getForumIndex().recordThreadPage(firstPage, requestedPage);
         }
 
         const result = {
           title: firstPage.title,
           posts: allPosts,
-          currentPage: pagesToFetch.at(-1),
-          pagesFetched: pagesToFetch,
+          currentPage: pagesFetched.at(-1),
+          pagesFetched,
           totalPages,
           url,
+          timeBudgetReached,
           ...(fetch_all_pages && !latest_pages && totalPages > MAX_PAGES
             ? { note: `Capped at ${MAX_PAGES} pages (thread has ${totalPages} total)` }
             : {}),
@@ -95,7 +121,7 @@ export function registerGetThread(server: McpServer): void {
         const content: Array<
           | { type: "text"; text: string }
           | { type: "image"; data: string; mimeType: string }
-        > = [{ type: "text", text: JSON.stringify(result) }];
+        > = [];
 
         if (include_images) {
           // Collect all unique image URLs from all posts
@@ -116,13 +142,20 @@ export function registerGetThread(server: McpServer): void {
           console.error(`[get-thread] Fetching ${imageUrls.length} images...`);
 
           for (const imgUrl of imageUrls) {
-            const img = await fetchImageAsBase64(imgUrl);
+            if (Date.now() >= deadlineAt) {
+              result.timeBudgetReached = true;
+              break;
+            }
+            const img = await fetchImageAsBase64(imgUrl, deadlineAt);
             if (img) {
               content.push({ type: "image", data: img.data, mimeType: img.mimeType });
               console.error(`[get-thread] Fetched image: ${imgUrl}`);
             }
           }
         }
+
+        if (include_images && Date.now() >= deadlineAt) result.timeBudgetReached = true;
+        content.unshift({ type: "text", text: JSON.stringify(result) });
 
         return { content };
       } catch (err) {
@@ -132,6 +165,6 @@ export function registerGetThread(server: McpServer): void {
           isError: true,
         };
       }
-    }
+    })
   );
 }
