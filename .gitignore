@@ -1,0 +1,9 @@
+node_modules/
+cookies.json
+*.tgz
+.env
+.env.*
+dist/
+exports/
+downloads/
+package/
