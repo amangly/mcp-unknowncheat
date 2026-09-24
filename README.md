@@ -4,7 +4,7 @@ A TypeScript MCP server for reading and searching the [UnknownCheats](https://ww
 
 ## Demo
 
-![Animated preview of the MCP finding a forum offsets post](demo/mcp-unknowncheat-preview.gif)
+https://github.com/user-attachments/assets/9f00f783-0a03-4e8d-b5b6-abd308936f20
 
 ## Install
 
