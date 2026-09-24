@@ -1,186 +1,66 @@
 # uc-mcp-server
 
-An MCP (Model Context Protocol) server for programmatically interacting with the [UnknownCheats](https://www.unknowncheats.me) forum. Bypasses Cloudflare protection using a real Chrome instance and provides structured data extraction via Cheerio.
+A TypeScript MCP server for reading and searching the [UnknownCheats](https://www.unknowncheats.me) forum. It uses Bun, a local Chrome window, and Cheerio to parse forum pages.
 
-[![npm version](https://img.shields.io/npm/v/uc-mcp-server)](https://www.npmjs.com/package/uc-mcp-server)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/amangly/mcp-unknowncheat/blob/master/LICENSE)
+## Install
 
-## Features
+Install [Bun](https://bun.sh) and Chrome or Chromium. Then run:
 
-- **Cloudflare bypass** — Uses `puppeteer-real-browser` with a headed Chrome instance to solve Turnstile challenges automatically
-- **Cookie persistence** — Session cookies saved to `cookies.json` and reused across restarts
-- **Auto-recovery** — Detects detached frame / browser crash errors and relaunches automatically
-- **12 MCP tools** — Login, search, thread reading, code extraction, downloads, subforum crawling, and diagnostics
+```sh
+bunx uc-mcp-server
+```
+
+To run from source:
+
+```sh
+git clone https://github.com/amangly/mcp-unknowncheat.git
+cd mcp-unknowncheat
+bun install --frozen-lockfile
+bun run start
+```
+
+The server uses MCP over standard input and output. Chrome opens when a tool first needs a page. You can log in with the `login` tool; session cookies are saved locally in `cookies.json`.
 
 ## Tools
 
-| Tool | Description | Parameters |
-|---|---|---|
-| `check_login` | Check if the browser session is logged in | — |
-| `login` | Auto-fill credentials and log in | `username`, `password` |
-| `search_forum` | Search UC or browse a subforum | `query`, `subforum?` |
-| `get_thread` | Fetch thread posts with pagination | `url`, `fetch_all_pages?` |
-| `extract_code` | Extract C++/C#/Python/Lua code blocks | `url`, `limit?`, `export_to_file?` |
-| `debug_page` | Inspect raw page structure for debugging | `url` |
-| `download_file` | Download and inspect a forum attachment | `url`, `analyze?` |
-| `list_subforums` | List forum sections | — |
-| `crawl_subforum` | Walk pages of a subforum | `subforum`, `pages?` |
-| `bulk_get_threads` | Retrieve multiple threads | See tool schema |
-| `crawl_cache` | Inspect or clear the HTML cache | See tool schema |
-| `get_user_reputation` | Read a user's reputation | See tool schema |
+| Tool | Purpose |
+|---|---|
+| `check_login` | Check session status |
+| `login` | Log in with a username and password |
+| `search_forum` | Search threads or browse a subforum |
+| `get_thread` | Read posts and pages in a thread |
+| `extract_code` | Extract code blocks from a thread |
+| `download_file` | Download and inspect an attachment |
+| `list_subforums` | List forum sections |
+| `crawl_subforum` | Collect threads from subforum pages |
+| `bulk_get_threads` | Read several threads |
+| `get_user_reputation` | Read reputation details |
+| `debug_page` | Inspect page structure |
+| `crawl_cache` | Inspect or clear the HTML cache |
 
-### extract_code details
+The MCP tool schemas provide the available arguments. For example:
 
-| Parameter | Default | Description |
-|---|---|---|
-| `url` | required | Thread URL |
-| `limit` | `10` (max `50`) | Max blocks to return inline |
-| `export_to_file` | `false` | Save **all** blocks to `exports/<slug>_<timestamp>.json` |
+```text
+search_forum({ query: "example" })
+get_thread({ url: "https://www.unknowncheats.me/forum/showthread.php?t=123" })
+```
 
-When the limit is hit, the response includes `truncated: true`, `last_post_id` (so you know where to resume), and a hint on how many blocks were skipped. Each block also carries a `postId` so you can trace it back to the exact post on the page.
+## Development
 
-## Stack
+```sh
+bun run typecheck
+bun run test
+bun run build
+```
 
-- **Runtime**: [Bun](https://bun.sh)
-- **Language**: TypeScript (ESM)
-- **Protocol**: [@modelcontextprotocol/sdk](https://github.com/modelcontextprotocol/typescript-sdk)
-- **Browser**: [puppeteer-real-browser](https://github.com/zfcsoftware/puppeteer-real-browser)
-- **Parsing**: [cheerio](https://cheerio.js.org)
+The browser code and tools are in `src/`; HTML parsers are in `src/parsers/`. `downloads/`, `exports/`, and `cookies.json` hold local output and are ignored by Git.
 
-## Requirements
-
-- [Bun](https://bun.sh) v1.0+
-- Google Chrome / Chromium installed (required by puppeteer-real-browser)
-
-### Linux: Hyprland / Wayland / headless agents
-
-On Linux, `puppeteer-real-browser` defaults to **Xvfb**. If Xvfb is not installed (common on Arch + Hyprland), Chrome may start without a visible window and Cloudflare Turnstile cannot be completed interactively.
-
-This server detects a real session (`DISPLAY` or `WAYLAND_DISPLAY`) and then:
-
-- sets `disableXvfb: true` so Chrome uses your compositor
-- passes `--ozone-platform=wayland` when `WAYLAND_DISPLAY` or `XDG_SESSION_TYPE=wayland` is set
-
-Optional environment variables:
+## Configuration
 
 | Variable | Default | Purpose |
-|---|---|---|
-| `UC_CF_WAIT_MS` | `15000` | Max wait (ms) for Cloudflare challenge to clear after navigation |
+|---|---:|---|
+| `UC_CF_WAIT_MS` | `15000` | Time to wait for a Cloudflare challenge, in milliseconds |
+| `UC_CACHE_TTL_MS` | `300000` | HTML cache lifetime, in milliseconds |
+| `UC_MIN_REQUEST_INTERVAL_MS` | `900` | Minimum interval between crawl requests, in milliseconds |
 
-**Manual login (first run):**
-
-```bash
-export WAYLAND_DISPLAY=wayland-1   # Hyprland default socket under $XDG_RUNTIME_DIR
-export XDG_RUNTIME_DIR=/run/user/$(id -u)
-bun run scripts/manual-login.ts
-```
-
-Complete Cloudflare in the opened Chromium window, log in, then `cookies.json` is saved for MCP/Cursor.
-
-## Installation
-
-```bash
-# via npm
-npx uc-mcp-server
-
-# or clone
-git clone https://github.com/amangly/mcp-unknowncheat.git
-cd mcp-unknowncheat
-bun install
-```
-
-## Setup with Claude Code
-
-```bash
-claude mcp add uc-mcp bun -- run "/path/to/mcp-unknowncheat/src/index.ts"
-```
-
-Or with npx:
-
-```bash
-claude mcp add uc-mcp npx -- uc-mcp-server
-```
-
-## Setup with Claude Desktop
-
-Add to `%APPDATA%\Claude\claude_desktop_config.json` (Windows) or `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS):
-
-```json
-{
-  "mcpServers": {
-    "uc-mcp": {
-      "command": "npx",
-      "args": ["uc-mcp-server"]
-    }
-  }
-}
-```
-
-## Usage
-
-On first run, Chrome opens in headed mode. Log in manually or use the `login` tool:
-
-```
-login({ username: "your_username", password: "your_password" })
-```
-
-Cookies are saved automatically. Subsequent runs reuse the session.
-
-### Examples
-
-```
-# Check login status
-check_login()
-
-# Browse the Apex Legends subforum
-search_forum({ subforum: "apex-legends" })
-
-# Search across all forums
-search_forum({ query: "pubg offsets" })
-
-# Get a thread (single page)
-get_thread({ url: "https://www.unknowncheats.me/forum/..." })
-
-# Get all pages of a thread
-get_thread({ url: "https://www.unknowncheats.me/forum/...", fetch_all_pages: true })
-
-# Extract code blocks (up to 10 inline)
-extract_code({ url: "https://www.unknowncheats.me/forum/..." })
-
-# Extract all code blocks and save to file
-extract_code({ url: "https://www.unknowncheats.me/forum/...", export_to_file: true })
-```
-
-## Project Structure
-
-```
-src/
-├── index.ts          # MCP server entry + tool registration
-├── browser.ts        # Chrome lifecycle, Cloudflare bypass, cookie persistence
-├── types.ts          # Shared TypeScript interfaces
-├── tools/
-│   ├── check-login.ts
-│   ├── login.ts
-│   ├── search-forum.ts
-│   ├── get-thread.ts
-│   ├── extract-code.ts
-│   └── debug-page.ts
-└── parsers/
-    ├── thread.ts         # Post extraction, pagination
-    ├── search-results.ts # Search result parsing
-    ├── code-blocks.ts    # Code extraction + language detection
-    └── tags.ts           # Thread tag detection ([Source], [Release], etc.)
-```
-
-## Notes
-
-- All logging uses `console.error()` — `console.log()` is reserved for the MCP stdio transport
-- Thread pagination capped at 50 pages by default for `fetch_all_pages`
-- Language detection supports: C++, C#, Python, Lua
-- Exported files are saved to `./exports/` and are excluded from git and npm
-
-## Issues
-
-Found a bug or want to request a feature? Open an issue at:
-
-https://github.com/amangly/mcp-unknowncheat/issues
+The npm package is [uc-mcp-server](https://www.npmjs.com/package/uc-mcp-server). Report bugs in [GitHub Issues](https://github.com/amangly/mcp-unknowncheat/issues).

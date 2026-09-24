@@ -14,8 +14,8 @@ function parseTitle($: ReturnType<typeof load>): string {
   const raw = $("title").first().text().trim();
   // Strip trailing " - Page N" and site suffix " - unknowncheats.me"
   return raw
-    .replace(/\s*-\s*Page\s+\d+\s*$/i, "")
     .replace(/\s*-\s*unknowncheats\.me\s*$/i, "")
+    .replace(/\s*-\s*Page\s+\d+\s*$/i, "")
     .trim() || "Unknown Thread";
 }
 

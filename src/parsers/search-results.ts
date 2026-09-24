@@ -37,7 +37,7 @@ export function parseSearchResults(html: string): SearchResult[] {
     const date = row.find(".date, .threadlastpost, .time").first().text().trim();
 
     const statsText = row.find(".threadstats, .threadcount").text();
-    const statNums = statsText.match(/\d+/g) ?? [];
+    const statNums = statsText.match(/\d[\d,]*/g) ?? [];
     const replies = parseCount(statNums[0] ?? "0");
     const views = parseCount(statNums[1] ?? "0");
 
