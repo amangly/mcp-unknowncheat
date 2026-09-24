@@ -2,6 +2,10 @@
 
 A TypeScript MCP server for reading and searching the [UnknownCheats](https://www.unknowncheats.me) forum. It uses Bun, a local Chrome window, and Cheerio to parse forum pages.
 
+## Demo
+
+[Watch the Apex Legends offsets lookup](https://github.com/amangly/mcp-unknowncheat/blob/master/demo/mcp-unknowncheat-apex-offsets-demo.mp4).
+
 ## Install
 
 Install [Bun](https://bun.sh) and Chrome or Chromium. Run the npm package with:
