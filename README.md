@@ -56,7 +56,7 @@ index_subforum({ subforum: "apex-legends", max_listing_pages: 1, max_threads: 5 
 search_index({ query: "offsets", subforum: "apex-legends" })
 ```
 
-The server advertises forum research tools for game hacking, anti-cheat, reversing, and offsets questions. The connected AI client decides whether to invoke them; tool descriptions and server instructions guide selection but do not force a call. For a specific claim, read its source thread and report the source URL and date.
+The server advertises forum research tools for game cheating scenes, cheat techniques and tooling, anti-cheat, reversing, and offsets questions. The connected AI client decides whether to invoke them; tool descriptions and server instructions guide selection but do not force a call. For a specific claim, read its source thread and report the source URL and date.
 
 The first directory lookup saves forum URLs in `forum-index.json`. Offsets lookups read the selected game's live thread listing, choose a linked candidate, and scan its recent pages from newest to oldest. Results include the listing URL, scanned pages, and source post. A matching post does not prove the offsets work with the current game build. If the game name is ambiguous, use a slug returned by `list_subforums` or pass an exact `thread_url`.
 
