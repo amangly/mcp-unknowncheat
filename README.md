@@ -1,10 +1,16 @@
-# uc-mcp-server
+# mcp-unknowncheat
 
 A TypeScript MCP server for reading and searching the [UnknownCheats](https://www.unknowncheats.me) forum. It uses Bun, a local Chrome window, and Cheerio to parse forum pages.
 
 ## Install
 
-Install [Bun](https://bun.sh) and Chrome or Chromium. Run this repository with:
+Install [Bun](https://bun.sh) and Chrome or Chromium. Run the npm package with:
+
+```sh
+bunx mcp-unknowncheat
+```
+
+To run the source:
 
 ```sh
 git clone https://github.com/amangly/mcp-unknowncheat.git
@@ -12,8 +18,6 @@ cd mcp-unknowncheat
 bun install --frozen-lockfile
 bun run start
 ```
-
-`bunx uc-mcp-server` runs the published npm version, which may lag this repository.
 
 The server uses MCP over standard input and output. Chrome opens when a tool first needs a page. You can log in with the `login` tool; session cookies are saved locally in `cookies.json`.
 
@@ -63,4 +67,4 @@ The browser code and tools are in `src/`; HTML parsers are in `src/parsers/`. `d
 | `UC_CACHE_TTL_MS` | `300000` | HTML cache lifetime, in milliseconds |
 | `UC_MIN_REQUEST_INTERVAL_MS` | `900` | Minimum interval between crawl requests, in milliseconds |
 
-The npm package is [uc-mcp-server](https://www.npmjs.com/package/uc-mcp-server). Report bugs in [GitHub Issues](https://github.com/amangly/mcp-unknowncheat/issues).
+The npm package is [mcp-unknowncheat](https://www.npmjs.com/package/mcp-unknowncheat). Report bugs in [GitHub Issues](https://github.com/amangly/mcp-unknowncheat/issues).

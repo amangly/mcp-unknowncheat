@@ -18,7 +18,7 @@ import { registerGetUserReputation } from "./tools/get-user-reputation.js";
 import { registerFindLatestOffsets } from "./tools/find-latest-offsets.js";
 
 const server = new McpServer(
-  { name: "unknowncheats", version: packageJson.version },
+  { name: packageJson.name, version: packageJson.version },
   { instructions: "For the newest offsets for any game, call find_latest_offsets with the game name. It discovers the game forum and offset thread from live listings, then scans recent posts backward. Report the source post and scan coverage. Do not present a found post as a verified current game offset." }
 );
 
@@ -51,4 +51,4 @@ process.on("SIGTERM", shutdown);
 const transport = new StdioServerTransport();
 await server.connect(transport);
 
-console.error("[server] MCP UnknownCheats server started (uc-mcp-server)");
+console.error(`[server] ${packageJson.name} started`);

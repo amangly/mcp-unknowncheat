@@ -1,11 +1,10 @@
 {
-  "name": "uc-mcp-server",
-  "version": "0.2.20",
+  "name": "mcp-unknowncheat",
+  "version": "0.3.0",
   "type": "module",
-  "description": "MCP server for UnknownCheats forum — Cloudflare bypass, thread scraping, code extraction",
-  "main": "src/index.ts",
+  "description": "MCP server for searching and reading the UnknownCheats forum",
   "bin": {
-    "uc-mcp-server": "src/index.ts"
+    "mcp-unknowncheat": "src/index.ts"
   },
   "keywords": [
     "mcp",
@@ -15,7 +14,7 @@
     "scraper",
     "ai"
   ],
-  "author": "amaralkaff",
+  "author": "amangly",
   "license": "MIT",
   "repository": {
     "type": "git",
