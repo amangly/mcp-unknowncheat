@@ -1,0 +1,60 @@
+import type { Subforum } from "./parsers/subforums.js";
+import type { ThreadListEntry } from "./parsers/thread-list.js";
+import type { ThreadPost } from "./types.js";
+
+export function normalizeName(value: string): string {
+  return value.toLowerCase().replace(/['’]/g, "").replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+export function rankGameForums(game: string, forums: Subforum[]): Subforum[] {
+  const query = normalizeName(game);
+  if (!query) return [];
+  const terms = query.split(" ");
+  return forums
+    .map((forum) => {
+      const label = normalizeName(forum.label);
+      const slug = normalizeName(forum.slug);
+      const score = label === query || slug === query
+        ? 100
+        : label.startsWith(`${query} `) || slug.startsWith(`${query} `)
+          ? 50
+          : terms.every((term) => label.split(" ").includes(term) || slug.split(" ").includes(term))
+            ? 10
+            : 0;
+      return { forum, score };
+    })
+    .filter(({ score }) => score > 0)
+    .sort((a, b) => b.score - a.score || a.forum.label.length - b.forum.label.length)
+    .map(({ forum }) => forum);
+}
+
+export type OffsetThread = ThreadListEntry & { listingPage: string; score: number };
+
+export function rankOffsetThreads(threads: ThreadListEntry[], listingPage: string): OffsetThread[] {
+  return threads
+    .map((thread) => {
+      const title = thread.title.toLowerCase();
+      const score = (/\boffsets?\b/.test(title) ? 5 : 0) +
+        (/\breversal\b/.test(title) ? 4 : 0) +
+        (/\bstructs?\b/.test(title) ? 2 : 0) +
+        (/\b(?:sigs?|signatures?)\b/.test(title) ? 2 : 0);
+      return { ...thread, listingPage, score };
+    })
+    .filter(({ score }) => score >= 4)
+    .sort((a, b) => b.score - a.score || b.replies - a.replies);
+}
+
+export function containsOffsetUpdate(post: ThreadPost): boolean {
+  const firstValue = post.content.search(/\b0x[0-9a-f]{3,}\b/i);
+  const firstLink = post.content.search(/https:\/\/(?:www\.)?(?:pastebin\.com|pastes\.dev)\//i);
+  const evidenceAt = [firstValue, firstLink].filter((index) => index >= 0).sort((a, b) => a - b)[0] ?? 200;
+  const introduction = post.content.slice(0, Math.min(evidenceAt, 200));
+  if (/\?|\b(?:anyone|looking for|need|requesting)\b/i.test(introduction)) {
+    return false;
+  }
+  const terms = /\b(offsets?|signatures?|sigs?|dump|patch)\b/i;
+  const pasteLink = post.links.some(({ url }) => /^https:\/\/(?:www\.)?(?:pastebin\.com|pastes\.dev)\//i.test(url));
+  const hexAssignments = post.content.match(/=\s*0x[0-9a-f]{3,}\b/gi)?.length ?? 0;
+  return (pasteLink && terms.test(post.content)) ||
+    (hexAssignments >= 3 && /\boffsets?\s*[:{]|\bconstexpr\b|\b(?:OFF_|dw[A-Z]|m_)/i.test(post.content));
+}

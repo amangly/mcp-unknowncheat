@@ -36,7 +36,7 @@ async function fetchImageAsBase64(url: string): Promise<{ data: string; mimeType
 export function registerGetThread(server: McpServer): void {
   server.tool(
     "get_thread",
-    "Get thread content from UnknownCheats. Set fetch_all_pages to true to retrieve all pages.",
+    "Get a forum thread. Use latest_pages for recent posts in long-running threads; the default reads only the linked page.",
     {
       url: z.string().url().describe("Thread URL"),
       fetch_all_pages: z
@@ -44,40 +44,50 @@ export function registerGetThread(server: McpServer): void {
         .optional()
         .default(false)
         .describe("If true, fetches all pages of the thread (max 50 pages)"),
+      latest_pages: z
+        .number()
+        .int()
+        .min(1)
+        .max(5)
+        .optional()
+        .describe("Read the last 1-5 pages. Takes precedence over fetch_all_pages."),
       include_images: z
         .boolean()
         .optional()
         .default(false)
         .describe("If true, fetches post images and returns them as viewable image content (max 10 images)"),
     },
-    async ({ url, fetch_all_pages, include_images }) => {
+    async ({ url, fetch_all_pages, latest_pages, include_images }) => {
       try {
         const firstHtml = await fetchHtml(url);
-        const firstPage = parseThread(firstHtml, url, 1);
+        const pageParam = Number(new URL(url).searchParams.get("page"));
+        const requestedPage = Number.isInteger(pageParam) && pageParam > 0 ? pageParam : 1;
+        const firstPage = parseThread(firstHtml, url, requestedPage);
+        const totalPages = firstPage.totalPages;
+        const pagesToFetch = latest_pages
+          ? Array.from({ length: Math.min(latest_pages, totalPages) }, (_, index) =>
+              totalPages - Math.min(latest_pages, totalPages) + index + 1)
+          : fetch_all_pages
+            ? Array.from({ length: Math.min(totalPages, MAX_PAGES) }, (_, index) => index + 1)
+            : [Math.min(requestedPage, totalPages)];
 
-        let allPosts: ThreadPost[] = [...firstPage.posts];
-
-        if (fetch_all_pages && firstPage.totalPages > 1) {
-          const pagesToFetch = Math.min(firstPage.totalPages, MAX_PAGES);
-
-          for (let pageNum = 2; pageNum <= pagesToFetch; pageNum++) {
-            const pageUrl = buildPageUrl(url, pageNum);
-            const html = await fetchHtml(pageUrl);
-            const parsed = parseThread(html, pageUrl, pageNum);
-            allPosts.push(...parsed.posts);
-
-            console.error(`[get-thread] Fetched page ${pageNum}/${pagesToFetch}`);
-          }
+        const allPosts: ThreadPost[] = [];
+        for (const pageNum of pagesToFetch) {
+          const pageUrl = buildPageUrl(url, pageNum);
+          const html = pageNum === requestedPage ? firstHtml : await fetchHtml(pageUrl);
+          allPosts.push(...parseThread(html, pageUrl, pageNum).posts);
+          console.error(`[get-thread] Fetched page ${pageNum}/${totalPages}`);
         }
 
         const result = {
           title: firstPage.title,
           posts: allPosts,
-          currentPage: fetch_all_pages ? Math.min(firstPage.totalPages, MAX_PAGES) : 1,
-          totalPages: firstPage.totalPages,
+          currentPage: pagesToFetch.at(-1),
+          pagesFetched: pagesToFetch,
+          totalPages,
           url,
-          ...(fetch_all_pages && firstPage.totalPages > MAX_PAGES
-            ? { note: `Capped at ${MAX_PAGES} pages (thread has ${firstPage.totalPages} total)` }
+          ...(fetch_all_pages && !latest_pages && totalPages > MAX_PAGES
+            ? { note: `Capped at ${MAX_PAGES} pages (thread has ${totalPages} total)` }
             : {}),
         };
 

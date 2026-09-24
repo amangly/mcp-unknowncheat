@@ -15,11 +15,12 @@ import { registerCrawlSubforum } from "./tools/crawl-subforum.js";
 import { registerBulkGetThreads } from "./tools/bulk-get-threads.js";
 import { registerCacheControl } from "./tools/cache-control.js";
 import { registerGetUserReputation } from "./tools/get-user-reputation.js";
+import { registerFindLatestOffsets } from "./tools/find-latest-offsets.js";
 
-const server = new McpServer({
-  name: "unknowncheats",
-  version: packageJson.version,
-});
+const server = new McpServer(
+  { name: "unknowncheats", version: packageJson.version },
+  { instructions: "For the newest offsets for any game, call find_latest_offsets with the game name. It discovers the game forum and offset thread from live listings, then scans recent posts backward. Report the source post and scan coverage. Do not present a found post as a verified current game offset." }
+);
 
 // Register all tools
 registerCheckLogin(server);
@@ -34,6 +35,7 @@ registerCrawlSubforum(server);
 registerBulkGetThreads(server);
 registerCacheControl(server);
 registerGetUserReputation(server);
+registerFindLatestOffsets(server);
 
 // Graceful shutdown
 async function shutdown() {

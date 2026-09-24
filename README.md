@@ -4,13 +4,7 @@ A TypeScript MCP server for reading and searching the [UnknownCheats](https://ww
 
 ## Install
 
-Install [Bun](https://bun.sh) and Chrome or Chromium. Then run:
-
-```sh
-bunx uc-mcp-server
-```
-
-To run from source:
+Install [Bun](https://bun.sh) and Chrome or Chromium. Run this repository with:
 
 ```sh
 git clone https://github.com/amangly/mcp-unknowncheat.git
@@ -18,6 +12,8 @@ cd mcp-unknowncheat
 bun install --frozen-lockfile
 bun run start
 ```
+
+`bunx uc-mcp-server` runs the published npm version, which may lag this repository.
 
 The server uses MCP over standard input and output. Chrome opens when a tool first needs a page. You can log in with the `login` tool; session cookies are saved locally in `cookies.json`.
 
@@ -31,10 +27,11 @@ The server uses MCP over standard input and output. Chrome opens when a tool fir
 | `get_thread` | Read posts and pages in a thread |
 | `extract_code` | Extract code blocks from a thread |
 | `download_file` | Download and inspect an attachment |
-| `list_subforums` | List forum sections |
+| `list_subforums` | List forum sections from a 24-hour local directory; use `refresh: true` to rebuild it |
 | `crawl_subforum` | Collect threads from subforum pages |
 | `bulk_get_threads` | Read several threads |
 | `get_user_reputation` | Read reputation details |
+| `find_latest_offsets` | Find a game's offsets thread in the forum and scan recent pages backward |
 | `debug_page` | Inspect page structure |
 | `crawl_cache` | Inspect or clear the HTML cache |
 
@@ -43,7 +40,10 @@ The MCP tool schemas provide the available arguments. For example:
 ```text
 search_forum({ query: "example" })
 get_thread({ url: "https://www.unknowncheats.me/forum/showthread.php?t=123" })
+find_latest_offsets({ game: "Apex Legends" })
 ```
+
+The first directory lookup saves forum URLs in `forum-index.json`. Offsets lookups read the selected game's live thread listing, choose a linked candidate, and scan its recent pages from newest to oldest. Results include the listing URL, scanned pages, and source post. A matching post does not prove the offsets work with the current game build. If the game name is ambiguous, use a slug returned by `list_subforums` or pass an exact `thread_url`.
 
 ## Development
 
@@ -53,7 +53,7 @@ bun run test
 bun run build
 ```
 
-The browser code and tools are in `src/`; HTML parsers are in `src/parsers/`. `downloads/`, `exports/`, and `cookies.json` hold local output and are ignored by Git.
+The browser code and tools are in `src/`; HTML parsers are in `src/parsers/`. `downloads/`, `exports/`, `cookies.json`, and `forum-index.json` are local output ignored by Git.
 
 ## Configuration
 

@@ -1,72 +1,22 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { load } from "cheerio";
 import { fetchHtml } from "../crawl.js";
-
-const UC_INDEX = "https://www.unknowncheats.me/forum/index.php";
-
-interface Subforum {
-  slug: string;
-  label: string;
-  url: string;
-  description?: string;
-  threadCount?: number;
-  postCount?: number;
-}
-
-function parseSubforums(html: string): Subforum[] {
-  const $ = load(html);
-  const map = new Map<string, Subforum>();
-
-  $("a[href*='/forum/']").each((_, el) => {
-    const link = $(el);
-    const rawHref = (link.attr("href") ?? "").trim();
-    if (!rawHref) return;
-
-    const normalized = rawHref.replace(/^\/\//, "https://");
-    const match = normalized.match(/\/forum\/([a-z0-9][a-z0-9-]{1,})\/?(?:$|[?#])/i);
-    if (!match) return;
-
-    const slug = match[1].toLowerCase();
-    if (slug.endsWith(".php") || ["forum", "index", "portal", "downloads", "search", "misc", "usercp"].includes(slug)) return;
-
-    const label = link.text().trim();
-    if (!label || label.length > 80) return;
-
-    if (map.has(slug)) return;
-
-    const row = link.closest("tr, li.forumbit_post, .forumbit_nopost");
-    const description = row.find(".forumdescription, .smallfont.forumdescription").first().text().trim() || undefined;
-
-    const statText = row.find(".forumstats, td.alt2").text();
-    const threadMatch = statText.match(/Threads[:\s]+([\d,]+)/i);
-    const postMatch = statText.match(/Posts[:\s]+([\d,]+)/i);
-
-    map.set(slug, {
-      slug,
-      label,
-      url: `https://www.unknowncheats.me/forum/${slug}/`,
-      description,
-      threadCount: threadMatch ? parseInt(threadMatch[1].replace(/,/g, ""), 10) : undefined,
-      postCount: postMatch ? parseInt(postMatch[1].replace(/,/g, ""), 10) : undefined,
-    });
-  });
-
-  return [...map.values()];
-}
+import { FORUM_INDEX, readForumCatalog, saveForumCatalog } from "../forum-catalog.js";
 
 export function registerListSubforums(server: McpServer): void {
   server.tool(
     "list_subforums",
-    "List UnknownCheats subforums discovered from the forum index. Optionally filter by keyword.",
+    "List game subforum URLs discovered from the live UnknownCheats index. The local directory expires after 24 hours.",
     {
       query: z.string().optional().describe("Optional keyword to filter subforum slugs/labels/descriptions"),
       limit: z.number().int().min(1).max(500).optional().default(100).describe("Max subforums returned (default 100)"),
+      refresh: z.boolean().optional().default(false).describe("Fetch the forum index again instead of using the local directory"),
     },
-    async ({ query, limit }) => {
+    async ({ query, limit, refresh }) => {
       try {
-        const html = await fetchHtml(UC_INDEX);
-        const all = parseSubforums(html);
+        const cached = refresh ? null : await readForumCatalog();
+        const catalog = cached ?? await saveForumCatalog(await fetchHtml(FORUM_INDEX, { bypassCache: refresh }));
+        const all = catalog.subforums;
 
         const filtered = query
           ? all.filter((sf) => {
@@ -89,6 +39,9 @@ export function registerListSubforums(server: McpServer): void {
                 total: all.length,
                 matched: filtered.length,
                 returned: capped.length,
+                source: catalog.source,
+                indexedAt: catalog.indexedAt,
+                fromCache: Boolean(cached),
                 subforums: capped,
               }),
             },
