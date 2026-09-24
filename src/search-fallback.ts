@@ -1,63 +1,7 @@
 import { load } from "cheerio";
+import { filterThreads, parseThreadList, type ThreadListEntry } from "./parsers/thread-list.js";
 
-export type FallbackSearchResult = {
-  title: string;
-  url: string;
-  threadId: string;
-  author?: string;
-  date?: string;
-  replies?: number;
-  views?: number;
-  subforum?: string;
-  snippet?: string;
-};
-
-type ThreadListResult = FallbackSearchResult;
-
-function parseThreadList(html: string): ThreadListResult[] {
-  const $ = load(html);
-  const results: ThreadListResult[] = [];
-
-  $("a[id^='thread_title_']").each((_, el) => {
-    const link = $(el);
-    const title = link.text().trim();
-    const href = link.attr("href") ?? "";
-    const id = (link.attr("id") ?? "").replace("thread_title_", "");
-    if (!title || !href) return;
-
-    const url = href.startsWith("http")
-      ? href
-      : `https://www.unknowncheats.me${href.startsWith("/") ? "" : "/"}${href}`;
-
-    const row = link.closest("tr, div[id^='threadbit'], li[id^='thread_']");
-    const date = row.find(".threadlastpost .date, .time, .date").first().text().trim();
-    const subforum = row.find("a[href*='forumdisplay'], .forumtitle").first().text().trim();
-    const snippet = row.find(".threadpreview, .searchresult_text, .smallfont:not(:has(a))").first().text().trim().slice(0, 200) || undefined;
-
-    results.push({
-      title,
-      url,
-      threadId: id,
-      date: date || undefined,
-      subforum: subforum || undefined,
-      snippet,
-    });
-  });
-
-  return results;
-}
-
-function filterByQuery(results: ThreadListResult[], query: string): ThreadListResult[] {
-  const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
-  if (terms.length === 0) return results;
-
-  return results.filter((result) => {
-    const haystack = `${result.title} ${result.snippet ?? ""}`.toLowerCase();
-    return terms.every((term) => haystack.includes(term));
-  });
-}
-
-export function discoverSubforumSlugs(html: string): Array<{ slug: string; label: string }> {
+function discoverSubforumSlugs(html: string): Array<{ slug: string; label: string }> {
   const $ = load(html);
   const slugs = new Map<string, string>();
 
@@ -76,7 +20,7 @@ export function discoverSubforumSlugs(html: string): Array<{ slug: string; label
   return [...slugs.entries()].map(([slug, label]) => ({ slug, label }));
 }
 
-export function rankSubforums(
+function rankSubforums(
   subforums: Array<{ slug: string; label: string }>,
   query: string
 ): Array<{ slug: string; label: string; score: number }> {
@@ -97,7 +41,7 @@ export function rankSubforums(
 export async function searchViaSubforums(
   query: string,
   fetchHtml: (url: string) => Promise<string>
-): Promise<{ results: FallbackSearchResult[]; scannedSubforums: string[] }> {
+): Promise<{ results: ThreadListEntry[]; scannedSubforums: string[] }> {
   const indexHtml = await fetchHtml("https://www.unknowncheats.me/forum/index.php");
   const subforums = discoverSubforumSlugs(indexHtml);
   const ranked = rankSubforums(subforums, query);
@@ -107,7 +51,7 @@ export async function searchViaSubforums(
     : [{ slug: query.trim().toLowerCase().replace(/\s+/g, "-"), label: query, score: 1 }];
 
   const seen = new Set<string>();
-  const results: FallbackSearchResult[] = [];
+  const results: ThreadListEntry[] = [];
   const scannedSubforums: string[] = [];
 
   for (const candidate of candidates) {
@@ -121,7 +65,7 @@ export async function searchViaSubforums(
     }
 
     scannedSubforums.push(candidate.slug);
-    const threads = filterByQuery(parseThreadList(html), query);
+    const threads = filterThreads(parseThreadList(html), { query, includeSticky: true });
 
     for (const thread of threads) {
       if (seen.has(thread.url)) continue;

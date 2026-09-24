@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { parseThread } from "../src/parsers/thread.ts";
-import { parseSearchResults } from "../src/parsers/search-results.ts";
+import { parseThreadList } from "../src/parsers/thread-list.ts";
 import { parseCodeBlocks } from "../src/parsers/code-blocks.ts";
+import { searchViaSubforums } from "../src/search-fallback.ts";
 
 describe("forum HTML parsers", () => {
   test("removes both page and site suffixes from thread titles", () => {
@@ -11,12 +12,22 @@ describe("forum HTML parsers", () => {
   });
 
   test("keeps thousands separators in search statistics", () => {
-    const html = `<div class="searchresult"><div class="threadtitle"><a href="/forum/showthread.php?t=1">Example</a></div><div class="threadstats">1,234 replies 56,789 views</div></div>`;
-    expect(parseSearchResults(html)).toMatchObject([{ replies: 1234, views: 56789 }]);
+    const html = `<table><tr><td><a id="thread_title_1" href="/forum/showthread.php?t=1">Example</a></td><td>1,234 Replies</td><td>56,789 Views</td></tr></table>`;
+    expect(parseThreadList(html)).toMatchObject([{ replies: 1234, views: 56789 }]);
   });
 
   test("extracts a code block once when selectors overlap", () => {
     const html = `<table id="post123"><tr><td><div class="highlight"><code>std::cout << "hello";</code></div></td></tr></table>`;
     expect(parseCodeBlocks(html)).toMatchObject([{ language: "cpp", postId: "post123" }]);
+  });
+
+  test("fallback search uses the shared thread-list parser", async () => {
+    const index = `<a href="/forum/apex-legends/">Apex Legends</a>`;
+    const listing = `<table><tr><td><a id="thread_title_42" href="/forum/showthread.php?t=42">Apex example</a></td><td>1,234 Replies</td><td>56,789 Views</td></tr></table>`;
+    const { results, scannedSubforums } = await searchViaSubforums("apex", async (url) =>
+      url.endsWith("index.php") ? index : listing
+    );
+    expect(scannedSubforums).toEqual(["apex-legends"]);
+    expect(results).toMatchObject([{ threadId: "42", replies: 1234, views: 56789 }]);
   });
 });

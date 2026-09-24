@@ -72,7 +72,6 @@ export function registerGetThread(server: McpServer): void {
 
         const result = {
           title: firstPage.title,
-          tags: firstPage.tags,
           posts: allPosts,
           currentPage: fetch_all_pages ? Math.min(firstPage.totalPages, MAX_PAGES) : 1,
           totalPages: firstPage.totalPages,

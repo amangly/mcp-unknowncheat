@@ -4,6 +4,7 @@ import { fetchHtml } from "../crawl.js";
 import { parseCodeBlocks } from "../parsers/code-blocks.js";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { mkdir } from "node:fs/promises";
 
 const MAX_CODE_LENGTH = 3_000;
 const EXPORT_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "exports");
@@ -52,6 +53,7 @@ export function registerExtractCode(server: McpServer): void {
             blocks: all,
           };
 
+          await mkdir(EXPORT_DIR, { recursive: true });
           await Bun.write(filePath, JSON.stringify(payload, null, 2));
 
           return {

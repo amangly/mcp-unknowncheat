@@ -1,20 +1,3 @@
-export interface LoginStatus {
-  loggedIn: boolean;
-  username?: string;
-}
-
-export interface SearchResult {
-  title: string;
-  url: string;
-  author: string;
-  date: string;
-  replies: number;
-  views: number;
-  subforum: string;
-  tags: string[];
-  snippet?: string;
-}
-
 export interface PostLink {
   text: string;
   url: string;
@@ -34,7 +17,6 @@ export interface ThreadPost {
 
 export interface ThreadData {
   title: string;
-  tags: string[];
   posts: ThreadPost[];
   currentPage: number;
   totalPages: number;

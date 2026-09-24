@@ -1,6 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { load } from "cheerio";
 import { navigateWithRetry } from "../browser.js";
+import { isLoggedIn } from "../auth.js";
 
 const UC_HOME = "https://www.unknowncheats.me/forum/";
 
@@ -10,8 +11,7 @@ export function registerCheckLogin(server: McpServer): void {
       const { html } = await navigateWithRetry(UC_HOME);
       const $ = load(html);
 
-      const logoutLink = $('a[href*="login.php?do=logout"]');
-      const loggedIn = logoutLink.length > 0;
+      const loggedIn = isLoggedIn(html);
 
       let username: string | undefined;
       if (loggedIn) {

@@ -5,78 +5,10 @@ import { navigateWithRetry } from "../browser.js";
 import { fetchHtml } from "../crawl.js";
 import { isLoggedIn } from "../auth.js";
 import { searchViaSubforums } from "../search-fallback.js";
+import { filterThreads, parseThreadList } from "../parsers/thread-list.js";
 
 const UC_HOME = "https://www.unknowncheats.me/forum/";
 const UC_SEARCH = "https://www.unknowncheats.me/forum/search.php";
-
-function parseThreadList(html: string) {
-  const $ = load(html);
-  const results: Array<{
-    title: string;
-    url: string;
-    threadId: string;
-    author?: string;
-    date?: string;
-    replies?: number;
-    views?: number;
-    subforum?: string;
-    snippet?: string;
-  }> = [];
-
-  $("a[id^='thread_title_']").each((_, el) => {
-    const link = $(el);
-    const title = link.text().trim();
-    const href = link.attr("href") ?? "";
-    const id = (link.attr("id") ?? "").replace("thread_title_", "");
-    if (!title || !href) return;
-
-    const url = href.startsWith("http") ? href : `https://www.unknowncheats.me${href.startsWith("/") ? "" : "/"}${href}`;
-
-    const row = link.closest("tr, div[id^='threadbit'], li[id^='thread_']");
-
-    const author = row.find(".threadstarterinfo a, a.username, .username").first().text().trim();
-    const date = row.find(".threadlastpost .date, .time, .date").first().text().trim();
-    const subforum = row.find("a[href*='forumdisplay'], .forumtitle").first().text().trim();
-
-    const cells = row.find("td");
-    let replies = 0;
-    let views = 0;
-    cells.each((_, td) => {
-      const text = $(td).text().trim();
-      const replyMatch = text.match(/(\d[\d,]*)\s*(?:Repl|repl)/);
-      const viewMatch = text.match(/(\d[\d,]*)\s*(?:View|view)/);
-      if (replyMatch) replies = parseInt(replyMatch[1].replace(/,/g, ""), 10);
-      if (viewMatch) views = parseInt(viewMatch[1].replace(/,/g, ""), 10);
-    });
-    if (replies === 0 && views === 0) {
-      const nums: number[] = [];
-      cells.each((_, td) => {
-        const text = $(td).text().trim().replace(/,/g, "");
-        if (/^\d+$/.test(text)) nums.push(parseInt(text, 10));
-      });
-      if (nums.length >= 2) {
-        replies = nums[nums.length - 2];
-        views = nums[nums.length - 1];
-      }
-    }
-
-    const snippet = row.find(".threadpreview, .searchresult_text, .smallfont:not(:has(a))").first().text().trim().slice(0, 200) || undefined;
-
-    results.push({ title, url, threadId: id, author: author || undefined, date: date || undefined, replies, views, subforum: subforum || undefined, snippet });
-  });
-
-  return results;
-}
-
-function filterByQuery<T extends { title: string; snippet?: string }>(results: T[], query: string): T[] {
-  const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
-  if (terms.length === 0) return results;
-
-  return results.filter((result) => {
-    const haystack = `${result.title} ${result.snippet ?? ""}`.toLowerCase();
-    return terms.every((term) => haystack.includes(term));
-  });
-}
 
 async function runFallbackSearch(query: string) {
   console.error(`[search] Not logged in — scanning UC subforums for "${query}"`);
@@ -97,9 +29,9 @@ async function runFallbackSearch(query: string) {
 export function registerSearchForum(server: McpServer): void {
   server.tool(
     "search_forum",
-    "Search the UnknownCheats forum. Uses advanced search when logged in; falls back to web search when guest. Can also browse subforums directly.",
+    "Search the UnknownCheats forum. Uses advanced search when logged in, scans relevant subforums as a guest, or browses a named subforum.",
     {
-      query: z.string().describe("Search query string"),
+      query: z.string().optional().default("").describe("Search query string; optional when browsing a subforum"),
       subforum: z.string().optional().describe("Subforum slug to browse directly (e.g. 'apex-legends')"),
       title_only: z.boolean().optional().default(true).describe("Search only in thread titles (default true, more accurate)"),
       sort_by: z.enum(["relevancy", "lastpost", "replycount", "views", "threadstart"]).optional().default("relevancy").describe("Sort results by"),
@@ -107,10 +39,17 @@ export function registerSearchForum(server: McpServer): void {
     },
     async ({ query, subforum, title_only, sort_by, search_user }) => {
       try {
+        if (!subforum && !query.trim()) {
+          return {
+            content: [{ type: "text", text: "Provide query or subforum" }],
+            isError: true,
+          };
+        }
+
         if (subforum) {
           const url = `https://www.unknowncheats.me/forum/${subforum}/`;
           const html = await fetchHtml(url);
-          const results = filterByQuery(parseThreadList(html), query);
+          const results = filterThreads(parseThreadList(html), { query, includeSticky: true });
           return {
             content: [{ type: "text", text: JSON.stringify({ count: results.length, subforum, results }) }],
           };
@@ -151,7 +90,6 @@ export function registerSearchForum(server: McpServer): void {
             if (userInput) userInput.value = opts.searchUser;
           }
 
-          searchForm.submit();
           return { ok: true };
         }, { query, titleOnly: title_only, sortBy: sort_by, searchUser: search_user ?? "" });
 
@@ -163,9 +101,9 @@ export function registerSearchForum(server: McpServer): void {
         }
 
         await Promise.all([
-          page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 30_000 }).catch(() => {}),
+          page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 30_000 }),
+          page.evaluate(() => (document.getElementById("searchform") as HTMLFormElement).submit()),
         ]);
-        await new Promise((r) => setTimeout(r, 2_000));
 
         const html = await page.content();
         const results = parseThreadList(html);

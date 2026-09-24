@@ -80,5 +80,5 @@ export function parseThread(html: string, url: string, pageNum = 1): ThreadData 
     }
   });
 
-  return { title, tags: [], posts, currentPage: pageNum, totalPages, url };
+  return { title, posts, currentPage: pageNum, totalPages, url };
 }

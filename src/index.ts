@@ -2,12 +2,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { closeBrowser } from "./browser.js";
-import { mkdir } from "node:fs/promises";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-
-const projectRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
-await mkdir(path.join(projectRoot, "exports"), { recursive: true }).catch(() => {});
+import packageJson from "../package.json" with { type: "json" };
 import { registerCheckLogin } from "./tools/check-login.js";
 import { registerLogin } from "./tools/login.js";
 import { registerSearchForum } from "./tools/search-forum.js";
@@ -23,7 +18,7 @@ import { registerGetUserReputation } from "./tools/get-user-reputation.js";
 
 const server = new McpServer({
   name: "unknowncheats",
-  version: "1.0.0",
+  version: packageJson.version,
 });
 
 // Register all tools
@@ -49,7 +44,6 @@ async function shutdown() {
 
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
-process.on("exit", () => closeBrowser());
 
 // Connect stdio transport (IMPORTANT: never write to stdout except via MCP)
 const transport = new StdioServerTransport();

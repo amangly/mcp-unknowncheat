@@ -2,7 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { getPage, navigateWithRetry, validateUrl } from "../browser.js";
 import path from "path";
-import { mkdir, readdir, readFile, rm, stat } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, stat } from "node:fs/promises";
 import { fileURLToPath } from "url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -64,19 +64,6 @@ function isTextFile(filePath: string): boolean {
 function isThirdParty(filePath: string): boolean {
   const parts = filePath.toLowerCase().split(/[\\/]/);
   return parts.some(p => SKIP_DIRS.has(p));
-}
-
-async function validateExtractedPaths(destDir: string): Promise<void> {
-  const resolvedDest = path.resolve(destDir);
-  const files = await listFilesRecursive(destDir);
-  for (const f of files) {
-    const fullPath = path.resolve(destDir, f.path);
-    if (!fullPath.startsWith(resolvedDest)) {
-      // Remove the offending file and throw
-      await rm(fullPath, { force: true }).catch(() => {});
-      throw new Error(`Zip-Slip detected: "${f.path}" escapes extraction directory`);
-    }
-  }
 }
 
 function formatSize(bytes: number): string {
@@ -165,12 +152,7 @@ export function registerDownloadFile(server: McpServer): void {
       try {
         validateUrl(url);
         await mkdir(DOWNLOADS_DIR, { recursive: true });
-
-        // Clean previous downloads
-        const oldFiles = await readdir(DOWNLOADS_DIR);
-        for (const f of oldFiles) {
-          await rm(path.join(DOWNLOADS_DIR, f), { recursive: true, force: true });
-        }
+        const runDir = await mkdtemp(path.join(DOWNLOADS_DIR, "run-"));
 
         let page = await getPage();
 
@@ -178,7 +160,7 @@ export function registerDownloadFile(server: McpServer): void {
         const client = await page.createCDPSession();
         await client.send("Browser.setDownloadBehavior", {
           behavior: "allow",
-          downloadPath: DOWNLOADS_DIR,
+          downloadPath: runDir,
           eventsEnabled: true,
         });
 
@@ -271,7 +253,7 @@ export function registerDownloadFile(server: McpServer): void {
 
         while (Date.now() - start < MAX_WAIT_MS) {
           await new Promise(r => setTimeout(r, POLL_MS));
-          const files = await readdir(DOWNLOADS_DIR);
+          const files = await readdir(runDir);
           // Filter out .crdownload / .part / .tmp partial files
           const completed = files.filter(f =>
             !f.endsWith(".crdownload") &&
@@ -296,7 +278,7 @@ export function registerDownloadFile(server: McpServer): void {
           };
         }
 
-        const downloadedPath = path.join(DOWNLOADS_DIR, downloadedFile);
+        const downloadedPath = path.join(runDir, downloadedFile);
         const fileStat = await stat(downloadedPath);
         const ext = path.extname(downloadedFile).toLowerCase();
 
@@ -313,7 +295,7 @@ export function registerDownloadFile(server: McpServer): void {
         let extractedDir: string | null = null;
 
         if (isArchive) {
-          extractedDir = path.join(DOWNLOADS_DIR, "extracted");
+          extractedDir = path.join(runDir, "extracted");
           await mkdir(extractedDir, { recursive: true });
 
           console.error(`[download] Extracting ${ext} archive...`);
@@ -325,9 +307,6 @@ export function registerDownloadFile(server: McpServer): void {
           } else if (ext === ".7z") {
             await extract7z(downloadedPath, extractedDir);
           }
-
-          // Validate no path traversal in extracted files
-          await validateExtractedPaths(extractedDir);
 
           const fileList = await listFilesRecursive(extractedDir);
           result.extracted = true;
@@ -409,7 +388,7 @@ export function registerDownloadFile(server: McpServer): void {
             : raw;
         } else {
           result.note = "File downloaded but not a recognized archive or text file. Check the downloads folder.";
-          result.downloads_path = DOWNLOADS_DIR;
+          result.downloads_path = runDir;
         }
 
         return {

@@ -1,8 +1,9 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { load } from "cheerio";
-import { navigateWithRetry, getPage } from "../browser.js";
+import { navigateWithRetry } from "../browser.js";
 import { clearCache } from "../crawl.js";
+import { isLoggedIn } from "../auth.js";
 
 const UC_LOGIN = "https://www.unknowncheats.me/forum/login.php";
 
@@ -31,7 +32,7 @@ export function registerLogin(server: McpServer): void {
         const html = await page.content();
         const $ = load(html);
 
-        const loggedIn = $('a[href*="login.php?do=logout"]').length > 0;
+        const loggedIn = isLoggedIn(html);
 
         if (!loggedIn) {
           // Check for error message
