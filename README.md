@@ -25,6 +25,74 @@ bun run start
 
 The server uses MCP over standard input and output. Chrome opens when a tool first needs a page. It keeps a dedicated profile under the user's application data directory (`mcp-unknowncheat/chrome-profile`) so a manually completed browser challenge and login can survive restarts. Set `UC_PROFILE_DIR` to an absolute path to choose another profile; an existing `cookies.json` is imported only when the profile is first created. On Linux without a graphical display, Chrome runs headless; set `UC_HEADLESS=1` to request headless mode elsewhere. If a Cloudflare challenge appears, complete it in the visible Chrome window. The server waits up to 45 seconds by default (`UC_CF_WAIT_MS`), subject to each tool's time budget. Automated browsers are not guaranteed to pass production challenges. Clients may need a tool timeout over 60 seconds for first-time manual setup.
 
+## Connect an MCP client
+
+Install Bun and Chrome first. Your MCP client starts the server with `bunx mcp-unknowncheatz`; you do not need to leave a separate terminal running. The examples below use the published npm package. To use a source checkout, replace `bunx mcp-unknowncheatz` with `bun run /absolute/path/to/mcp-unknowncheat/src/index.ts`.
+
+### Codex
+
+Add the server from a terminal:
+
+```sh
+codex mcp add unknowncheat -- bunx mcp-unknowncheatz
+codex mcp list
+```
+
+Or add this to `~/.codex/config.toml` (on Windows, `%USERPROFILE%\.codex\config.toml`):
+
+```toml
+[mcp_servers.unknowncheat]
+command = "bunx"
+args = ["mcp-unknowncheatz"]
+tool_timeout_sec = 120
+```
+
+Restart Codex after editing the config file.
+
+### Claude Code
+
+```sh
+claude mcp add --scope user unknowncheat -- bunx mcp-unknowncheatz
+claude mcp list
+```
+
+Use `--scope project` if the server should be available only in one project.
+
+### Claude Desktop and Cursor
+
+Add the server entry under `mcpServers` in the client's JSON config. Claude Desktop uses `%APPDATA%\Claude\claude_desktop_config.json` on Windows or `~/Library/Application Support/Claude/claude_desktop_config.json` on macOS. Cursor uses `~/.cursor/mcp.json` for all projects or `.cursor/mcp.json` in one project.
+
+```json
+{
+  "mcpServers": {
+    "unknowncheat": {
+      "command": "bunx",
+      "args": ["mcp-unknowncheatz"]
+    }
+  }
+}
+```
+
+Merge this entry into an existing `mcpServers` object if you already have other servers. Quit and reopen the client after saving the file.
+
+### VS Code
+
+Add this to `.vscode/mcp.json` in your workspace, then run **MCP: List Servers** from the Command Palette to start or inspect it:
+
+```json
+{
+  "servers": {
+    "unknowncheat": {
+      "type": "stdio",
+      "command": "bunx",
+      "args": ["mcp-unknowncheatz"]
+    }
+  }
+}
+```
+
+For other clients, configure a local stdio MCP server with command `bunx` and argument `mcp-unknowncheatz`. If the client cannot find `bunx`, use its absolute executable path. On first use, allow time for the package to start and for any browser challenge; where supported, set a tool timeout of at least 120 seconds. Ask the client to list its MCP tools or call `check_login` to confirm the connection.
+
 ## Tools
 
 | Tool | Purpose |
@@ -78,7 +146,7 @@ The HTML inspector reads a saved page locally and reports selector counts, parse
 
 | Variable | Default | Purpose |
 |---|---:|---|
-| `UC_CF_WAIT_MS` | `15000` | Time to wait for a Cloudflare challenge, in milliseconds |
+| `UC_CF_WAIT_MS` | `45000` | Time to wait for a Cloudflare challenge, in milliseconds |
 | `UC_CACHE_TTL_MS` | `300000` | HTML cache lifetime, in milliseconds |
 | `UC_MIN_REQUEST_INTERVAL_MS` | `900` | Minimum interval between crawl requests, in milliseconds |
 | `UC_INDEX_PATH` | User application data directory | Path of the local SQLite search index |
