@@ -4,7 +4,7 @@ A TypeScript MCP server for reading and searching the [UnknownCheats](https://ww
 
 ## Demo
 
-[Watch the Apex Legends offsets lookup](https://github.com/amangly/mcp-unknowncheat/blob/master/demo/mcp-unknowncheat-apex-offsets-demo.mp4).
+https://github.com/user-attachments/assets/bcb9e608-d7f1-4bf4-8fe6-5d46ef6fcc3f
 
 ## Install
 
