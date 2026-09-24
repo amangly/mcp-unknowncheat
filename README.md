@@ -8,7 +8,7 @@ https://github.com/user-attachments/assets/9f00f783-0a03-4e8d-b5b6-abd308936f20
 
 ## Install
 
-Install [Bun](https://bun.sh) and Google Chrome. The server uses the maintained `puppeteer-core` package and your installed browser; installation does not download a browser. Set `UC_CHROME_PATH` to an absolute Chrome or Chromium executable path if Chrome is not in its standard location. Run the npm package with:
+Install [Bun](https://bun.sh) and Google Chrome. The server uses `puppeteer-real-browser` and your installed browser; installation does not download a browser. Set `UC_CHROME_PATH` to an absolute Chrome or Chromium executable path if Chrome is not in its standard location. Run the npm package with:
 
 ```sh
 bunx mcp-unknowncheatz

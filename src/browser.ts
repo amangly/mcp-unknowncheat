@@ -1,4 +1,4 @@
-import puppeteer, { type Browser, type Page } from "puppeteer-core";
+import { connect } from "puppeteer-real-browser";
 import { existsSync, mkdirSync } from "node:fs";
 import os from "node:os";
 import path from "path";
@@ -41,8 +41,8 @@ export function validateUrl(url: string): void {
 }
 
 type BrowserInstance = {
-  browser: Browser;
-  page: Page;
+  browser: Awaited<ReturnType<typeof connect>>["browser"];
+  page: Awaited<ReturnType<typeof connect>>["page"];
 };
 
 let instance: BrowserInstance | null = null;
@@ -101,14 +101,17 @@ async function launchBrowser(): Promise<BrowserInstance> {
   const executablePath = process.env.UC_CHROME_PATH?.trim();
   const existingProfile = existsSync(PROFILE_DIR);
   mkdirSync(PROFILE_DIR, { recursive: true });
-  const browser = await puppeteer.launch({
-    ...(executablePath ? { executablePath } : { channel: "chrome" as const }),
+  const { browser, page } = await connect({
     headless: useHeadless(),
+    turnstile: true,
     args: onWayland ? ["--ozone-platform=wayland", "--start-maximized"] : ["--start-maximized"],
-    defaultViewport: null,
-    userDataDir: PROFILE_DIR,
+    customConfig: {
+      ...(executablePath ? { chromePath: executablePath } : {}),
+      userDataDir: PROFILE_DIR,
+    },
+    connectOption: { defaultViewport: null },
+    disableXvfb: useRealDisplay(),
   });
-  const page = await browser.newPage();
 
   browser.on("disconnected", () => {
     console.error("[browser] Browser disconnected");
@@ -143,8 +146,12 @@ function hasCloudflareChallenge(html: string): boolean {
   return CLOUDFLARE_INDICATORS.some((indicator) => html.includes(indicator));
 }
 
-async function waitForChallenge(page: Page, initialHtml: string, deadlineAt?: number): Promise<string> {
-  if (!hasCloudflareChallenge(initialHtml)) return initialHtml;
+function isPendingPage(html: string): boolean {
+  return html.length < 200 || hasCloudflareChallenge(html);
+}
+
+async function waitForChallenge(page: BrowserInstance["page"], initialHtml: string, deadlineAt?: number): Promise<string> {
+  if (!isPendingPage(initialHtml)) return initialHtml;
   if (useHeadless()) {
     throw new Error("CloudflareBlockError: A challenge appeared in headless Chrome. Use visible Chrome to complete it manually.");
   }
@@ -155,7 +162,7 @@ async function waitForChallenge(page: Page, initialHtml: string, deadlineAt?: nu
     await Bun.sleep(Math.min(1_000, stopAt - Date.now()));
     try {
       const html = await page.content();
-      if (!hasCloudflareChallenge(html)) return html;
+      if (!isPendingPage(html)) return html;
     } catch (error) {
       if (!isDetachedError(error)) throw error;
     }

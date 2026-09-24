@@ -1,6 +1,6 @@
 {
   "name": "mcp-unknowncheatz",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "type": "module",
   "description": "MCP server for searching and reading the UnknownCheats forum",
   "bin": {
@@ -43,7 +43,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.1",
     "cheerio": "^1.2.0",
-    "puppeteer-core": "25.12.0",
+    "puppeteer-real-browser": "1.4.4",
     "zod": "^4.6.5"
   },
   "devDependencies": {
