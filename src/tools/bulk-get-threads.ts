@@ -9,6 +9,8 @@ import { normalizeThreadUrl } from "../forum-url.js";
 import { getForumIndex } from "../forum-index.js";
 import type { ThreadPost } from "../types.js";
 import type { AuthorReputation } from "../parsers/reputation.js";
+import { DEFAULT_RECENT_PAGES, bulkPageNumbers, recentPageNumbers } from "../thread-pages.js";
+import type { CodeBlock } from "../types.js";
 
 const MAX_URLS = 20;
 const MAX_PAGES_PER_THREAD = 10;
@@ -67,7 +69,7 @@ function aggregateAuthors(posts: ThreadPost[]): AuthorAgg[] {
 export function registerBulkGetThreads(server: McpServer): void {
   server.tool(
     "bulk_get_threads",
-    "Fetch multiple UC threads (cached + rate-limited). Includes author reputation, trust scores, and OP-rep filters so untrustworthy threads can be skipped.",
+    "Fetch multiple UC threads, including the first page and the latest 3 pages by default. Reports exactly which recent pages were read. Includes author reputation and OP filters.",
     {
       urls: z
         .array(z.string().url())
@@ -97,6 +99,13 @@ export function registerBulkGetThreads(server: McpServer): void {
         .optional()
         .default(false)
         .describe(`If true, fetch every page of each thread (cap ${MAX_PAGES_PER_THREAD})`),
+      latest_pages: z
+        .number()
+        .int()
+        .min(0)
+        .max(5)
+        .optional()
+        .describe("Read the last 1-5 pages plus the first page (default 3). Set 0 for the first page only. Ignored when fetch_all_pages is true."),
       post_content_chars: z
         .number()
         .int()
@@ -129,6 +138,7 @@ export function registerBulkGetThreads(server: McpServer): void {
       include_code,
       code_limit_per_thread,
       fetch_all_pages,
+      latest_pages,
       post_content_chars,
       min_op_rep,
       exclude_negative_op,
@@ -152,7 +162,7 @@ export function registerBulkGetThreads(server: McpServer): void {
         try {
           validateUrl(url);
 
-          const firstHtml = await fetchHtml(url, { deadlineAt });
+          const firstHtml = await fetchHtml(url, { deadlineAt, bypassCache: true });
           const first = parseThread(firstHtml, url, 1);
           getForumIndex().recordThreadPage(first, 1);
           const opPost = first.posts[0];
@@ -190,26 +200,29 @@ export function registerBulkGetThreads(server: McpServer): void {
 
           let allPosts: ThreadPost[] = [...first.posts];
           const pagesFetched: number[] = [1];
+          const recentPages = recentPageNumbers(first.totalPages, latest_pages ?? DEFAULT_RECENT_PAGES);
+          const codeBlocks: CodeBlock[] = include_code ? parseCodeBlocks(firstHtml) : [];
+          let pageFetchError: string | undefined;
 
-          if (fetch_all_pages && first.totalPages > 1) {
-            const limit = Math.min(first.totalPages, MAX_PAGES_PER_THREAD);
-            for (let pageNum = 2; pageNum <= limit; pageNum++) {
-              if (Date.now() >= deadlineAt) {
-                timeBudgetReached = true;
-                break;
-              }
-              const pageUrl = buildPageUrl(url, pageNum);
-              try {
-                const pageHtml = await fetchHtml(pageUrl, { deadlineAt });
-                const parsed = parseThread(pageHtml, pageUrl, pageNum);
-                getForumIndex().recordThreadPage(parsed, pageNum);
-                allPosts.push(...parsed.posts);
-                pagesFetched.push(pageNum);
-              } catch (pageErr) {
-                if (Date.now() >= deadlineAt) timeBudgetReached = true;
-                console.error(`[bulk] Page ${pageNum} of ${url} failed:`, pageErr);
-                break;
-              }
+          const additionalPages = bulkPageNumbers(first.totalPages, latest_pages ?? DEFAULT_RECENT_PAGES, fetch_all_pages, MAX_PAGES_PER_THREAD).slice(1);
+          for (const pageNum of additionalPages) {
+            if (Date.now() >= deadlineAt) {
+              timeBudgetReached = true;
+              break;
+            }
+            const pageUrl = buildPageUrl(url, pageNum);
+            try {
+              const pageHtml = await fetchHtml(pageUrl, { deadlineAt, bypassCache: true });
+              const parsed = parseThread(pageHtml, pageUrl, pageNum);
+              getForumIndex().recordThreadPage(parsed, pageNum);
+              allPosts.push(...parsed.posts);
+              if (include_code) codeBlocks.push(...parseCodeBlocks(pageHtml));
+              pagesFetched.push(pageNum);
+            } catch (pageErr) {
+              if (Date.now() >= deadlineAt) timeBudgetReached = true;
+              pageFetchError = pageErr instanceof Error ? pageErr.message : String(pageErr);
+              console.error(`[bulk] Page ${pageNum} of ${url} failed:`, pageErr);
+              break;
             }
           }
 
@@ -219,6 +232,9 @@ export function registerBulkGetThreads(server: McpServer): void {
             url,
             title: first.title,
             currentPagesFetched: pagesFetched,
+            recentPagesRequested: recentPages,
+            recentPagesComplete: recentPages.length > 0 && recentPages.every((pageNum) => pagesFetched.includes(pageNum)),
+            ...(pageFetchError ? { pageFetchError } : {}),
             totalPages: first.totalPages,
             postCount: allPosts.length,
             op: opPost
@@ -268,14 +284,15 @@ export function registerBulkGetThreads(server: McpServer): void {
           }
 
           if (include_code) {
-            const codeBlocks = parseCodeBlocks(firstHtml)
-              .slice(0, code_limit_per_thread)
+            const shownBlocks = codeBlocks
+              .slice(-code_limit_per_thread)
               .map((block) => ({
                 ...block,
                 code: truncate(block.code, MAX_CODE_CHARS),
               }));
-            threadResult.codeBlocks = codeBlocks;
+            threadResult.codeBlocks = shownBlocks;
             threadResult.codeBlockCount = codeBlocks.length;
+            threadResult.codeBlocksTruncated = codeBlocks.length > shownBlocks.length;
           }
 
           results.push(threadResult);

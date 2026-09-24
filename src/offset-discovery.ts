@@ -1,6 +1,6 @@
 import type { Subforum } from "./parsers/subforums.js";
 import type { ThreadListEntry } from "./parsers/thread-list.js";
-import type { ThreadPost } from "./types.js";
+import type { CodeBlock, ThreadPost } from "./types.js";
 
 export function normalizeName(value: string): string {
   return value.toLowerCase().replace(/['’]/g, "").replace(/[^a-z0-9]+/g, " ").trim();
@@ -73,10 +73,21 @@ export function rankSharedForumOffsetThreads(game: string, threads: ThreadListEn
   return rankOffsetThreads(threads, listingPage)
     .filter((thread) => {
       const title = normalizeName(thread.title);
-      return gameTerms.every((term) => title.split(" ").includes(term)) &&
-        (!wantsCn || /\b(?:cn|chinese|wegame)\b/.test(title));
+      return gameTerms.every((term) => title.split(" ").includes(term));
     })
+    .map((thread) => ({
+      ...thread,
+      score: thread.score + (wantsCn && /\b(?:cn|chinese|wegame)\b/.test(normalizeName(thread.title)) ? 10 : 0),
+    }))
     .sort((a, b) => b.score - a.score || b.replies - a.replies);
+}
+
+export function matchesSharedForumQuery(game: string, threadTitle: string, postContent: string): boolean {
+  const terms = new Set(normalizeName(`${threadTitle} ${postContent}`).split(" "));
+  return normalizeName(game).split(" ").every((term) =>
+    ["cn", "chinese", "wegame"].includes(term)
+      ? ["cn", "chinese", "wegame"].some((alias) => terms.has(alias))
+      : terms.has(term));
 }
 
 export function containsOffsetUpdate(post: ThreadPost): boolean {
@@ -90,6 +101,23 @@ export function containsOffsetUpdate(post: ThreadPost): boolean {
   const terms = /\b(offsets?|signatures?|sigs?|dump|patch)\b/i;
   const pasteLink = post.links.some(({ url }) => /^https:\/\/(?:www\.)?(?:pastebin\.com|pastes\.dev)\//i.test(url));
   const hexAssignments = post.content.match(/=\s*0x[0-9a-f]{3,}\b/gi)?.length ?? 0;
+  const namedHexValues = post.content.match(/\b[A-Za-z_][A-Za-z0-9_.]{2,}\s*(?::|=|\s+0x)\s*(?:0x)?[0-9a-f]{7,16}\b/gi)?.length ?? 0;
+  const colonValues = post.content.match(/\b[A-Za-z_][A-Za-z0-9_.]{2,}\s*:\s*(?:0x)?[0-9a-f]{7,16}\b/gi)?.length ?? 0;
   return (pasteLink && terms.test(post.content)) ||
-    (hexAssignments >= 3 && /\boffsets?\s*[:{]|\bconstexpr\b|\b(?:OFF_|dw[A-Z]|m_)/i.test(post.content));
+    (hexAssignments >= 3 && /\boffsets?\s*[:{]|\bconstexpr\b|\b(?:OFF_|dw[A-Z]|m_)/i.test(post.content)) ||
+    (namedHexValues >= 2 && (colonValues >= 2 || /\b(?:new|latest|updated|version|offsets|sdk|dump)\b/i.test(post.content)));
+}
+
+export function postsWithCodeBlocks(posts: ThreadPost[], blocks: CodeBlock[]): ThreadPost[] {
+  const byPost = new Map<string, string[]>();
+  for (const block of blocks) {
+    if (!block.postId) continue;
+    const code = byPost.get(block.postId) ?? [];
+    code.push(block.code);
+    byPost.set(block.postId, code);
+  }
+  return posts.map((post) => {
+    const code = byPost.get(`post${post.postNumber}`)?.filter((block) => !post.content.includes(block)) ?? [];
+    return code.length > 0 ? { ...post, content: `${post.content}\n${code.join("\n")}` } : post;
+  });
 }

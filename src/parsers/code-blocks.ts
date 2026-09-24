@@ -36,7 +36,10 @@ export function parseCodeBlocks(html: string): CodeBlock[] {
   // vBulletin highlight blocks, pre, and code tags
   $(".highlight, pre, code").each((_, el) => {
     const element = $(el);
-    const code = element.text().trim();
+    const withLines = element.clone();
+    withLines.find("br").replaceWith("\n");
+    withLines.find("li").append("\n");
+    const code = withLines.text().trim();
 
     if (!code || code.length < 10 || seen.has(code)) return;
     seen.add(code);

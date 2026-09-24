@@ -6,14 +6,29 @@ import { FORUM_INDEX, readForumCatalog, saveForumCatalog, type ForumCatalog } fr
 import type { Subforum } from "../parsers/subforums.js";
 import { parseThreadList, parsePaginationInfo } from "../parsers/thread-list.js";
 import { parseThread } from "../parsers/thread.js";
-import { containsOffsetUpdate, normalizeName, rankGameForums, rankOffsetThreads, rankSharedForumOffsetThreads, type OffsetThread } from "../offset-discovery.js";
+import { containsOffsetUpdate, matchesSharedForumQuery, normalizeName, postsWithCodeBlocks, rankGameForums, rankOffsetThreads, rankSharedForumOffsetThreads, type OffsetThread } from "../offset-discovery.js";
+import { parseCodeBlocks } from "../parsers/code-blocks.js";
 import { getForumIndex } from "../forum-index.js";
 import { normalizeThreadUrl } from "../forum-url.js";
 import { searchNativeThreads } from "../forum-search.js";
+import { DEFAULT_RECENT_PAGES, recentPageNumbers } from "../thread-pages.js";
+import type { ThreadPost } from "../types.js";
 
 const MAX_LISTING_PAGES = 10;
 const MAX_THREAD_PAGES = 50;
+const MAX_CANDIDATE_THREADS = 5;
 type ForumPage = Awaited<ReturnType<typeof navigateWithRetry>>["page"];
+
+interface OffsetScan {
+  title: string;
+  url: string;
+  discoveredAt?: string;
+  totalPages: number;
+  pagesScanned: number[];
+  recentPagesRequested: number[];
+  recentPagesComplete: boolean;
+  match?: { post: ThreadPost; sourcePage: string };
+}
 
 function withPage(url: string, page: number): string {
   const target = new URL(url);
@@ -39,19 +54,68 @@ async function readPage(page: ForumPage, url: string, deadlineAt: number): Promi
   }
 }
 
+async function scanThread(
+  browserPage: ForumPage | null,
+  target: { url: string; title?: string; discoveredAt?: string },
+  firstResponse: { page: ForumPage; html: string } | null,
+  game: string,
+  checkQuery: boolean,
+  maxThreadPages: number,
+  deadlineAt: number,
+): Promise<{ page: ForumPage; scan: OffsetScan }> {
+  const first = firstResponse ?? (browserPage
+    ? await readPage(browserPage, target.url, deadlineAt)
+    : await navigateWithRetry(target.url, deadlineAt));
+  let currentPage: ForumPage = first.page;
+  const thread = parseThread(first.html, target.url);
+  if (thread.posts.length === 0) throw new Error(`No posts parsed from ${target.url}`);
+  const pagesScanned: number[] = [];
+  const recentPagesRequested = recentPageNumbers(thread.totalPages, Math.min(DEFAULT_RECENT_PAGES, maxThreadPages));
+  const oldestPage = Math.max(1, thread.totalPages - maxThreadPages + 1);
+  let match: OffsetScan["match"];
+
+  for (let number = thread.totalPages; number >= oldestPage; number--) {
+    if (Date.now() >= deadlineAt) break;
+    const url = withPage(target.url, number);
+    const response = number === 1 && thread.totalPages === 1 ? first : await readPage(currentPage, url, deadlineAt);
+    currentPage = response.page;
+    const parsed = parseThread(response.html, url, number);
+    if (parsed.posts.length === 0) throw new Error(`No posts parsed from ${url}`);
+    getForumIndex().recordThreadPage(parsed, number);
+    pagesScanned.push(number);
+    const posts = postsWithCodeBlocks(parsed.posts, parseCodeBlocks(response.html));
+    const newestOnPage = posts.reverse().find((post) =>
+      containsOffsetUpdate(post) && (!checkQuery || matchesSharedForumQuery(game, thread.title, post.content)));
+    if (newestOnPage && !match) match = { post: newestOnPage, sourcePage: url };
+    if (match && recentPagesRequested.every((pageNum) => pagesScanned.includes(pageNum))) break;
+  }
+
+  return { page: currentPage, scan: {
+    title: target.title ?? thread.title,
+    url: target.url,
+    discoveredAt: target.discoveredAt,
+    totalPages: thread.totalPages,
+    pagesScanned,
+    recentPagesRequested,
+    recentPagesComplete: recentPagesRequested.every((pageNum) => pagesScanned.includes(pageNum)),
+    match,
+  } };
+}
+
 export function registerFindLatestOffsets(server: McpServer): void {
   server.tool(
     "find_latest_offsets",
-    "Use when asked for the newest game offsets on UnknownCheats. Discover the game's offsets thread from live listings, then scan from its last page backward for the newest matching post; this does not verify the offsets against a game build.",
+    "Use when asked for the newest game offsets on UnknownCheats. Compare the latest 3 pages of plausible candidate threads before returning a match; this does not verify offsets against a game build.",
     {
       game: z.string().min(1).describe("Game name, such as Apex Legends or PUBG"),
       subforum_slug: z.string().optional().describe("Exact subforum slug from list_subforums when needed"),
       thread_url: z.string().url().optional().describe("Exact UnknownCheats thread URL, skipping forum and thread discovery"),
       max_listing_pages: z.number().int().min(1).max(MAX_LISTING_PAGES).optional().default(5).describe("Maximum game-forum listing pages to inspect"),
-      max_thread_pages: z.number().int().min(1).max(MAX_THREAD_PAGES).optional().default(20).describe("Maximum recent thread pages to inspect"),
+      max_thread_pages: z.number().int().min(1).max(MAX_THREAD_PAGES).optional().default(DEFAULT_RECENT_PAGES).describe("Maximum recent thread pages to inspect (default 3; increase to search farther back)"),
+      max_candidate_threads: z.number().int().min(1).max(MAX_CANDIDATE_THREADS).optional().default(3).describe("Maximum plausible offset threads to compare (default 3)"),
     },
     { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
-    async ({ game, subforum_slug, thread_url, max_listing_pages, max_thread_pages }) => withBrowserSession(async () => {
+    async ({ game, subforum_slug, thread_url, max_listing_pages, max_thread_pages, max_candidate_threads }) => withBrowserSession(async () => {
       const deadlineAt = Date.now() + 45_000;
       try {
         if (thread_url) thread_url = normalizeThreadUrl(thread_url);
@@ -64,11 +128,8 @@ export function registerFindLatestOffsets(server: McpServer): void {
         let forumChoices: Subforum[] = [];
         const listingPagesScanned: string[] = [];
         let candidates: OffsetThread[] = [];
-        let selectedUrl = thread_url;
-        let selectedTitle: string | undefined;
-        let discoveredAt: string | undefined;
 
-        if (!selectedUrl) {
+        if (!thread_url) {
           catalog = await readForumCatalog();
           fromCache = catalog !== null;
           if (!catalog) {
@@ -148,49 +209,58 @@ export function registerFindLatestOffsets(server: McpServer): void {
               forumIndex: catalog ? { url: FORUM_INDEX, indexedAt: catalog.indexedAt, fromCache } : undefined, listingPagesScanned,
             }) }] };
           }
-          selectedUrl = selected.url;
-          selectedTitle = selected.title;
-          discoveredAt = selected.listingPage;
         }
 
-        const first = entry ?? await readPage(browserPage!, selectedUrl, deadlineAt);
-        browserPage = first.page;
-        const thread = parseThread(first.html, selectedUrl);
-        selectedTitle ??= thread.title;
-        if (thread.posts.length === 0) throw new Error(`No posts parsed from ${selectedUrl}`);
-        const pagesScanned: number[] = [];
-        const oldestPage = Math.max(1, thread.totalPages - max_thread_pages + 1);
-
-        for (let number = thread.totalPages; number >= oldestPage; number--) {
+        const targets = thread_url
+          ? [{ url: thread_url }]
+          : candidates.slice(0, max_candidate_threads).map((candidate) => ({
+            url: candidate.url, title: candidate.title, discoveredAt: candidate.listingPage,
+          }));
+        const scans: OffsetScan[] = [];
+        const errors: Array<{ url: string; error: string }> = [];
+        for (const target of targets) {
           if (Date.now() >= deadlineAt) break;
-          const url = withPage(selectedUrl, number);
-          const response: { page: ForumPage; html: string } = number === 1 && thread.totalPages === 1 ? first : await readPage(browserPage!, url, deadlineAt);
-          browserPage = response.page;
-          const parsed = parseThread(response.html, url, number);
-          const posts = parsed.posts;
-          if (posts.length === 0) throw new Error(`No posts parsed from ${url}`);
-          getForumIndex().recordThreadPage(parsed, number);
-          pagesScanned.push(number);
-          const match = posts.reverse().find(containsOffsetUpdate);
-          if (match) {
-            return { content: [{ type: "text", text: JSON.stringify({
-              found: true, game, forum, candidateForums: forumChoices.slice(0, 5),
-              forumIndex: catalog ? { url: FORUM_INDEX, indexedAt: catalog.indexedAt, fromCache } : undefined,
-              thread: { title: selectedTitle, url: selectedUrl, discoveredAt }, candidateThreads: candidates,
-              listingPagesScanned, totalThreadPages: thread.totalPages, pagesScanned,
-              sourcePage: url, sourcePost: `${url}#post${match.postNumber}`,
-              checkedAt: new Date().toISOString(),
-              post: { date: match.date, author: match.author, postNumber: match.postNumber, content: match.content.slice(0, 2_000), links: match.links },
-              note: "Newest matching post in the scanned pages. Linked data and game-version validity are unverified.",
-            }) }] };
+          try {
+            const result = await scanThread(
+              browserPage, target, target.url === thread_url ? entry : null,
+              game, !forum && !thread_url, max_thread_pages, deadlineAt,
+            );
+            browserPage = result.page;
+            scans.push(result.scan);
+          } catch (error) {
+            errors.push({ url: target.url, error: error instanceof Error ? error.message : String(error) });
           }
+        }
+        const best = scans.filter((scan) => scan.match)
+          .sort((a, b) => b.match!.post.postNumber - a.match!.post.postNumber)[0];
+        const candidateScanIncomplete = candidates.length > targets.length || targets.length !== scans.length ||
+          scans.some((scan) => !scan.recentPagesComplete);
+        const discoveryIncomplete = !thread_url;
+        const incomplete = candidateScanIncomplete || discoveryIncomplete;
+
+        if (best?.match) {
+          const { post, sourcePage } = best.match;
+          return { content: [{ type: "text", text: JSON.stringify({
+            found: true, game, forum, candidateForums: forumChoices.slice(0, 5),
+            forumIndex: catalog ? { url: FORUM_INDEX, indexedAt: catalog.indexedAt, fromCache } : undefined,
+            thread: { title: best.title, url: best.url, discoveredAt: best.discoveredAt }, candidateThreads: candidates,
+            listingPagesScanned, totalThreadPages: best.totalPages, pagesScanned: best.pagesScanned,
+            recentPagesRequested: best.recentPagesRequested, recentPagesComplete: best.recentPagesComplete,
+            scannedThreads: scans.map(({ match, ...scan }) => ({ ...scan, matchedPostNumber: match?.post.postNumber })),
+            errors, candidateScanIncomplete, discoveryIncomplete, incomplete,
+            sourcePage, sourcePost: `${sourcePage}#post${post.postNumber}`,
+            checkedAt: new Date().toISOString(),
+            post: { date: post.date, author: post.author, postNumber: post.postNumber, content: post.content.slice(0, 2_000), links: post.links },
+            note: "Newest matching post by post ID among scanned candidates. Unscanned threads and game-version validity are unverified.",
+          }) }] };
         }
 
         return { content: [{ type: "text", text: JSON.stringify({
-          found: false, reason: Date.now() >= deadlineAt ? "time_budget_reached" : "no_offset_update_in_scanned_pages", game, forum,
+          found: false, reason: Date.now() >= deadlineAt ? "time_budget_reached" : scans.length === 0 ? "candidate_scans_failed" : "no_offset_update_in_scanned_pages", game, forum,
           forumIndex: catalog ? { url: FORUM_INDEX, indexedAt: catalog.indexedAt, fromCache } : undefined,
-          thread: { title: selectedTitle, url: selectedUrl, discoveredAt }, candidateThreads: candidates,
-          listingPagesScanned, totalThreadPages: thread.totalPages, pagesScanned,
+          candidateThreads: candidates, listingPagesScanned,
+          scannedThreads: scans.map(({ match, ...scan }) => scan), errors,
+          candidateScanIncomplete, discoveryIncomplete, incomplete,
           checkedAt: new Date().toISOString(),
         }) }] };
       } catch (err) {

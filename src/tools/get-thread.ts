@@ -3,12 +3,16 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { fetchHtml } from "../crawl.js";
 import { parseThread } from "../parsers/thread.js";
+import { parseCodeBlocks } from "../parsers/code-blocks.js";
 import { getForumIndex } from "../forum-index.js";
 import type { ThreadPost } from "../types.js";
 import { normalizeThreadUrl } from "../forum-url.js";
+import { DEFAULT_RECENT_PAGES, recentPageNumbers } from "../thread-pages.js";
 
 const MAX_PAGES = 50;
 const MAX_IMAGES = 10; // max images to fetch and embed per call
+const MAX_CODE_BLOCKS = 10;
+const MAX_CODE_CHARS = 2_000;
 
 function buildPageUrl(baseUrl: string, page: number): string {
   const url = new URL(baseUrl);
@@ -39,7 +43,7 @@ async function fetchImageAsBase64(url: string, deadlineAt: number): Promise<{ da
 export function registerGetThread(server: McpServer): void {
   server.tool(
     "get_thread",
-    "Read the source UnknownCheats thread behind a game hacking or offset claim. Use latest_pages for recent posts in long-running threads; the default reads only the linked page.",
+    "Read a source thread. By default, read its latest 3 pages so current claims are checked against recent posts. An explicit page= URL reads that page; latest_pages or fetch_all_pages overrides it.",
     {
       url: z.string().url().describe("Thread URL"),
       fetch_all_pages: z
@@ -53,7 +57,7 @@ export function registerGetThread(server: McpServer): void {
         .min(1)
         .max(5)
         .optional()
-        .describe("Read the last 1-5 pages. Takes precedence over fetch_all_pages."),
+        .describe("Read the last 1-5 pages (default 3 unless the URL names a page or fetch_all_pages is true)."),
       include_images: z
         .boolean()
         .optional()
@@ -65,20 +69,24 @@ export function registerGetThread(server: McpServer): void {
       try {
         url = normalizeThreadUrl(url);
         const deadlineAt = Date.now() + 45_000;
-        const firstHtml = await fetchHtml(url, { deadlineAt });
-        const pageParam = Number(new URL(url).searchParams.get("page"));
-        const requestedPage = Number.isInteger(pageParam) && pageParam > 0 ? pageParam : 1;
+        const firstHtml = await fetchHtml(url, { deadlineAt, bypassCache: true });
+        const pageValue = new URL(url).searchParams.get("page");
+        const pageParam = Number(pageValue);
+        const explicitPage = pageValue !== null && Number.isInteger(pageParam) && pageParam > 0;
+        const requestedPage = explicitPage ? pageParam : 1;
         const firstPage = parseThread(firstHtml, url, requestedPage);
         if (firstPage.posts.length === 0) throw new Error(`No thread posts found at ${url} (page title: ${firstPage.title})`);
         const totalPages = firstPage.totalPages;
-        const pagesToFetch = latest_pages
-          ? Array.from({ length: Math.min(latest_pages, totalPages) }, (_, index) =>
-              totalPages - Math.min(latest_pages, totalPages) + index + 1)
+        const pagesToFetch = latest_pages !== undefined
+          ? recentPageNumbers(totalPages, latest_pages)
           : fetch_all_pages
             ? Array.from({ length: Math.min(totalPages, MAX_PAGES) }, (_, index) => index + 1)
-            : [Math.min(requestedPage, totalPages)];
+            : explicitPage ? [Math.min(requestedPage, totalPages)]
+              : recentPageNumbers(totalPages, DEFAULT_RECENT_PAGES);
+        const recentPagesRequested = recentPageNumbers(totalPages, DEFAULT_RECENT_PAGES);
 
         const allPosts: ThreadPost[] = [];
+        const allCodeBlocks: Array<ReturnType<typeof parseCodeBlocks>[number] & { page: number }> = [];
         const pagesFetched: number[] = [];
         let timeBudgetReached = false;
         for (const pageNum of pagesToFetch) {
@@ -89,7 +97,7 @@ export function registerGetThread(server: McpServer): void {
           const pageUrl = buildPageUrl(url, pageNum);
           let html: string;
           try {
-            html = pageNum === requestedPage ? firstHtml : await fetchHtml(pageUrl, { deadlineAt });
+            html = pageNum === requestedPage ? firstHtml : await fetchHtml(pageUrl, { deadlineAt, bypassCache: true });
           } catch (error) {
             if (Date.now() < deadlineAt) throw error;
             timeBudgetReached = true;
@@ -97,12 +105,14 @@ export function registerGetThread(server: McpServer): void {
           }
           const parsed = parseThread(html, pageUrl, pageNum);
           allPosts.push(...parsed.posts);
+          allCodeBlocks.push(...parseCodeBlocks(html).map((block) => ({ ...block, page: pageNum })));
           getForumIndex().recordThreadPage(parsed, pageNum);
           pagesFetched.push(pageNum);
           console.error(`[get-thread] Fetched page ${pageNum}/${totalPages}`);
         }
         if (pagesFetched.length === 0 && firstPage.posts.length > 0) {
           allPosts.push(...firstPage.posts);
+          allCodeBlocks.push(...parseCodeBlocks(firstHtml).map((block) => ({ ...block, page: requestedPage })));
           pagesFetched.push(requestedPage);
           getForumIndex().recordThreadPage(firstPage, requestedPage);
         }
@@ -110,12 +120,23 @@ export function registerGetThread(server: McpServer): void {
         const result = {
           title: firstPage.title,
           posts: allPosts,
+          codeBlockCount: allCodeBlocks.length,
+          codeBlocks: allCodeBlocks.slice(-MAX_CODE_BLOCKS).map((block) => ({
+            ...block,
+            code: block.code.length > MAX_CODE_CHARS
+              ? `${block.code.slice(0, MAX_CODE_CHARS)}\n... [truncated, ${block.code.length} chars total]`
+              : block.code,
+          })),
+          codeBlocksTruncated: allCodeBlocks.length > MAX_CODE_BLOCKS,
           currentPage: pagesFetched.at(-1),
           pagesFetched,
+          pagesRequested: pagesToFetch,
+          recentPagesRequested,
+          recentPagesComplete: recentPagesRequested.every((pageNum) => pagesFetched.includes(pageNum)),
           totalPages,
           url,
           timeBudgetReached,
-          ...(fetch_all_pages && !latest_pages && totalPages > MAX_PAGES
+          ...(fetch_all_pages && latest_pages === undefined && totalPages > MAX_PAGES
             ? { note: `Capped at ${MAX_PAGES} pages (thread has ${totalPages} total)` }
             : {}),
         };
