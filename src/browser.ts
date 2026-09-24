@@ -1,16 +1,26 @@
 import puppeteer, { type Browser, type Page } from "puppeteer-core";
+import { existsSync, mkdirSync } from "node:fs";
+import os from "node:os";
 import path from "path";
 import { fileURLToPath } from "url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const COOKIES_PATH = path.join(__dirname, "..", "cookies.json");
+const DATA_DIR = process.platform === "win32"
+  ? path.join(process.env.LOCALAPPDATA ?? os.homedir(), "mcp-unknowncheat")
+  : path.join(process.env.XDG_DATA_HOME ?? path.join(os.homedir(), ".local", "share"), "mcp-unknowncheat");
+const PROFILE_DIR = process.env.UC_PROFILE_DIR ?? path.join(DATA_DIR, "chrome-profile");
 const CLOUDFLARE_INDICATORS = ["Just a moment", "cf-browser-verification", "Checking your browser"];
 const NAV_TIMEOUT = 30_000;
 const NAV_TIMEOUT_RETRY = 60_000;
-const CF_WAIT_MS = Number(process.env.UC_CF_WAIT_MS ?? 15_000);
+const CF_WAIT_MS = Number(process.env.UC_CF_WAIT_MS ?? 45_000);
 
 function useRealDisplay(): boolean {
   return !!(process.env.DISPLAY || process.env.WAYLAND_DISPLAY);
+}
+
+function useHeadless(): boolean {
+  return process.env.UC_HEADLESS === "1" || (process.platform !== "win32" && !useRealDisplay());
 }
 
 const ALLOWED_HOSTS = new Set(["www.unknowncheats.me", "unknowncheats.me"]);
@@ -89,11 +99,14 @@ async function launchBrowser(): Promise<BrowserInstance> {
   console.error("[browser] Launching Chrome...");
   const onWayland = process.env.XDG_SESSION_TYPE === "wayland" || !!process.env.WAYLAND_DISPLAY;
   const executablePath = process.env.UC_CHROME_PATH?.trim();
+  const existingProfile = existsSync(PROFILE_DIR);
+  mkdirSync(PROFILE_DIR, { recursive: true });
   const browser = await puppeteer.launch({
     ...(executablePath ? { executablePath } : { channel: "chrome" as const }),
-    headless: process.env.UC_HEADLESS === "1" || (process.platform !== "win32" && !useRealDisplay()),
+    headless: useHeadless(),
     args: onWayland ? ["--ozone-platform=wayland", "--start-maximized"] : ["--start-maximized"],
     defaultViewport: null,
+    userDataDir: PROFILE_DIR,
   });
   const page = await browser.newPage();
 
@@ -102,7 +115,7 @@ async function launchBrowser(): Promise<BrowserInstance> {
     instance = null;
   });
 
-  await loadCookies(page);
+  if (!existingProfile) await loadCookies(page);
   return { browser, page };
 }
 
@@ -128,6 +141,26 @@ export async function ensureFreshBrowser(): Promise<BrowserInstance["page"]> {
 
 function hasCloudflareChallenge(html: string): boolean {
   return CLOUDFLARE_INDICATORS.some((indicator) => html.includes(indicator));
+}
+
+async function waitForChallenge(page: Page, initialHtml: string, deadlineAt?: number): Promise<string> {
+  if (!hasCloudflareChallenge(initialHtml)) return initialHtml;
+  if (useHeadless()) {
+    throw new Error("CloudflareBlockError: A challenge appeared in headless Chrome. Use visible Chrome to complete it manually.");
+  }
+  const waitMs = Number.isFinite(CF_WAIT_MS) ? Math.max(0, CF_WAIT_MS) : 45_000;
+  const stopAt = Math.min(Date.now() + waitMs, deadlineAt ?? Infinity);
+  console.error(`[browser] Cloudflare challenge: complete it in the visible Chrome window (up to ${Math.ceil((stopAt - Date.now()) / 1000)} seconds).`);
+  while (Date.now() < stopAt) {
+    await Bun.sleep(Math.min(1_000, stopAt - Date.now()));
+    try {
+      const html = await page.content();
+      if (!hasCloudflareChallenge(html)) return html;
+    } catch (error) {
+      if (!isDetachedError(error)) throw error;
+    }
+  }
+  throw new Error("CloudflareBlockError: Challenge stayed open in Chrome. Complete it manually or use forum-supported access; this server cannot guarantee automated clearance.");
 }
 
 function isDetachedError(err: unknown): boolean {
@@ -159,21 +192,11 @@ export async function navigateWithRetry(url: string, deadlineAt?: number): Promi
     return Math.max(1, Math.min(maximum, left));
   };
 
-  const attempt = async (timeout: number, waitUntil: "networkidle2" | "domcontentloaded" = "networkidle2"): Promise<string> => {
+  const attempt = async (timeout: number, waitUntil: "networkidle2" | "domcontentloaded" = "domcontentloaded"): Promise<string> => {
     await page.goto(url, { waitUntil, timeout: remaining(timeout) });
 
-    let html = await page.content();
-
-    if (hasCloudflareChallenge(html)) {
-      console.error("[browser] Cloudflare challenge detected, waiting", CF_WAIT_MS, "ms...");
-      await new Promise((res) => setTimeout(res, remaining(CF_WAIT_MS)));
-      remaining(1);
-      html = await page.content();
-
-      if (hasCloudflareChallenge(html)) {
-        throw new Error("CloudflareBlockError: Challenge did not resolve after waiting");
-      }
-    }
+    const html = await waitForChallenge(page, await page.content(), deadlineAt);
+    remaining(1);
 
     await saveCookies(page);
     return html;

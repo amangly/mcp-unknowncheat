@@ -23,7 +23,7 @@ bun install --frozen-lockfile
 bun run start
 ```
 
-The server uses MCP over standard input and output. Chrome opens when a tool first needs a page. On Linux without a graphical display, it runs headless; set `UC_HEADLESS=1` to request headless mode elsewhere. You can log in with the `login` tool; session cookies are saved locally in `cookies.json`. Browser challenges may require manual interaction in a visible Chrome window.
+The server uses MCP over standard input and output. Chrome opens when a tool first needs a page. It keeps a dedicated profile under the user's application data directory (`mcp-unknowncheat/chrome-profile`) so a manually completed browser challenge and login can survive restarts. Set `UC_PROFILE_DIR` to an absolute path to choose another profile; an existing `cookies.json` is imported only when the profile is first created. On Linux without a graphical display, Chrome runs headless; set `UC_HEADLESS=1` to request headless mode elsewhere. If a Cloudflare challenge appears, complete it in the visible Chrome window. The server waits up to 45 seconds by default (`UC_CF_WAIT_MS`), subject to each tool's time budget. Automated browsers are not guaranteed to pass production challenges. Clients may need a tool timeout over 60 seconds for first-time manual setup.
 
 ## Tools
 
