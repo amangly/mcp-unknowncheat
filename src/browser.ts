@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "path";
 import { fileURLToPath } from "url";
 import { isApacheNotFoundPage, normalizeThreadUrl } from "./forum-url.js";
+import { getAvailableDebuggingPort } from "./browser-port.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const COOKIES_PATH = path.join(__dirname, "..", "cookies.json");
@@ -102,6 +103,7 @@ async function launchBrowser(): Promise<BrowserInstance> {
   const executablePath = process.env.UC_CHROME_PATH?.trim();
   const existingProfile = existsSync(PROFILE_DIR);
   mkdirSync(PROFILE_DIR, { recursive: true });
+  const debuggingPort = await getAvailableDebuggingPort();
   const { browser, page } = await connect({
     headless: useHeadless(),
     turnstile: true,
@@ -109,6 +111,7 @@ async function launchBrowser(): Promise<BrowserInstance> {
     customConfig: {
       ...(executablePath ? { chromePath: executablePath } : {}),
       userDataDir: PROFILE_DIR,
+      port: debuggingPort,
     },
     connectOption: { defaultViewport: null },
     disableXvfb: useRealDisplay(),

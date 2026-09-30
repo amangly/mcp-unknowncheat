@@ -132,6 +132,8 @@ Browsing or crawling a subforum records its visible listing in the local index. 
 
 ## Development
 
+If a tool returns `connect ECONNREFUSED 127.0.0.1:<port>` while Chrome stays on a blank page, update to a build containing the explicit debugging-port fix. `chrome-launcher 1.2.2` can select an old port from the dedicated profile's accumulated log on restart. The server now allocates a fresh loopback port for each launch. Close any abandoned Chrome window using the dedicated MCP profile before restarting the server; keep your ordinary Chrome windows open. A profile must be used by only one server instance at a time. This startup error occurs before forum navigation and is separate from a Cloudflare verification loop.
+
 ```sh
 bun run typecheck
 bun run test
